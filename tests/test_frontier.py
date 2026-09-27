@@ -64,8 +64,8 @@ class TestBanditPolicy:
 
     def test_links_without_a_tag_path_group_by_url_template(self):
         frontier = Frontier('bandit')
-        frontier.add('https://x.hu/alapok/a', kind='other', probability=0.5, depth=0)
-        frontier.add('https://x.hu/alapok/b', kind='other', probability=0.5, depth=0)
+        frontier.add('https://site-hu.example/alapok/a', kind='other', probability=0.5, depth=0)
+        frontier.add('https://site-hu.example/alapok/b', kind='other', probability=0.5, depth=0)
         assert list(frontier.groups) == ['url:/alapok/*']
 
 
@@ -107,4 +107,4 @@ class TestDefault:
         from docseek.jev_crawl import jev_crawl
         from docseek.server import DiscoverRequest
         assert inspect.signature(jev_crawl).parameters['frontier_policy'].default == 'tier'
-        assert DiscoverRequest(url='https://x.hu', goal='g').frontier_policy == 'tier'
+        assert DiscoverRequest(url='https://site-hu.example', goal='g').frontier_policy == 'tier'

@@ -72,14 +72,14 @@ def test_the_agent_does_not_record_a_download_that_points_inside(monkeypatch):
     from docseek.llm import ChatReply, Usage
     from tests.test_agent import _patch_visit_page_scraper
 
-    monkeypatch.setattr(reach, '_resolve', lambda host: ('169.254.169.254',) if host == 'metadata.evil' else ('93.184.216.34',))
+    monkeypatch.setattr(reach, '_resolve', lambda host: ('169.254.169.254',) if host == 'metadata.evil.example' else ('93.184.216.34',))
 
     class Scripted:
         provider, model, usage = 's', 's', Usage()
 
         def __init__(self):
-            self.calls = [('record_download', {'url': 'http://metadata.evil/latest/meta-data/', 'name': 'x', 'reason': 'r'}),
-                          ('record_downloads', {'items': [{'url': 'http://metadata.evil/a.pdf'},
+            self.calls = [('record_download', {'url': 'http://metadata.evil.example/latest/meta-data/', 'name': 'x', 'reason': 'r'}),
+                          ('record_downloads', {'items': [{'url': 'http://metadata.evil.example/a.pdf'},
                                                           {'url': 'https://example.com/a.pdf'}], 'reason': 'r'}),
                           ('done', {'reason': 'd'})]
 

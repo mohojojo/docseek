@@ -112,8 +112,8 @@ class TestNeighbours:
     """Revealed links are judged next to the page's other documents, as a normal harvest judges them."""
 
     def test_neighbours_are_asked_about_but_only_candidates_get_a_score(self):
-        revealed = [{'url': f'https://x.dev/havi_2026{m}.pdf', 'name': 'Letöltés'} for m in ('01', '02')]
-        page_docs = [{'url': 'https://x.dev/havi_202608.pdf', 'name': '2026. augusztusi jelentés (Alapfigyelő)'}]
+        revealed = [{'url': f'https://site.example/havi_2026{m}.pdf', 'name': 'Letöltés'} for m in ('01', '02')]
+        page_docs = [{'url': 'https://site.example/havi_202608.pdf', 'name': '2026. augusztusi jelentés (Alapfigyelő)'}]
 
         def ask(state, questions):
             assert [link['text'] for link in state['links']][-1] == page_docs[0]['name']

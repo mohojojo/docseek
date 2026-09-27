@@ -2,12 +2,12 @@
 from docseek.models import AgenticDownload
 from eval.run_jev import score_run, summarise
 
-EXPECTED = {'https://site.hu/a.pdf', 'https://site.hu/b.pdf', 'https://site.hu/c.pdf'}
-PAGES = {'https://site.hu/early': 5, 'https://site.hu/late': 25}
+EXPECTED = {'https://shop.example/a.pdf', 'https://shop.example/b.pdf', 'https://shop.example/c.pdf'}
+PAGES = {'https://shop.example/early': 5, 'https://shop.example/late': 25}
 
 
-def candidate(name: str, verdict: str, source_page: str = 'https://site.hu/early', source: str = 'page'):
-    return AgenticDownload(url=f'https://site.hu/{name}.pdf', name=name, reason='', source_page=source_page,
+def candidate(name: str, verdict: str, source_page: str = 'https://shop.example/early', source: str = 'page'):
+    return AgenticDownload(url=f'https://shop.example/{name}.pdf', name=name, reason='', source_page=source_page,
                            verdict=verdict, source=source)
 
 
@@ -20,13 +20,13 @@ class TestScoreRun:
         assert run['returned']['precision'] == 0.5
 
     def test_recall_at_counts_only_candidates_found_by_that_page(self):
-        run = score_run([candidate('a', 'accepted'), candidate('b', 'accepted', 'https://site.hu/late')],
+        run = score_run([candidate('a', 'accepted'), candidate('b', 'accepted', 'https://shop.example/late')],
                         PAGES, EXPECTED)
         assert run['recall_at'] == {'10': 0.333, '20': 0.333, '40': 0.667}
         assert run['pages_to_first_hit'] == 5
 
     def test_sitemap_and_api_candidates_exist_before_the_first_page(self):
-        run = score_run([candidate('a', 'accepted', 'https://site.hu/', 'sitemap')], PAGES, EXPECTED)
+        run = score_run([candidate('a', 'accepted', 'https://shop.example/', 'sitemap')], PAGES, EXPECTED)
         assert run['pages_to_first_hit'] == 0
         assert run['recall_at']['10'] == 0.333
 
@@ -59,9 +59,9 @@ class TestWiderEval:
         assert wrong['accepted']['precision'] == 0.0 and wrong['accepted']['false_accepts'] == 1
 
     def test_the_query_string_can_be_a_documents_identity(self):
-        docs = [AgenticDownload(url=f'https://site.hu/getfile.aspx?id={i}', name=str(i), reason='',
-                                source_page='https://site.hu/early', verdict='accepted', source='page')
+        docs = [AgenticDownload(url=f'https://shop.example/getfile.aspx?id={i}', name=str(i), reason='',
+                                source_page='https://shop.example/early', verdict='accepted', source='page')
                 for i in (1, 2)]
-        expected = {'https://site.hu/getfile.aspx?id=1', 'https://site.hu/getfile.aspx?id=2'}
+        expected = {'https://shop.example/getfile.aspx?id=1', 'https://shop.example/getfile.aspx?id=2'}
         assert score_run(docs, PAGES, expected, keep_query=True)['accepted']['true_positives'] == 2
-        assert score_run(docs, PAGES, {'https://site.hu/getfile.aspx'})['accepted']['found_count'] == 1
+        assert score_run(docs, PAGES, {'https://shop.example/getfile.aspx'})['accepted']['found_count'] == 1

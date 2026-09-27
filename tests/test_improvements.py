@@ -211,11 +211,11 @@ class TestFastHarvest:
     def test_skips_off_domain_links_when_same_domain_only(self):
         html = (
             '<html><body>' + 'word ' * 200 +
-            '<a href="https://other.com/report.pdf">External</a>'
+            '<a href="https://other.example/report.pdf">External</a>'
             '</body></html>'
         )
         result = self._harvest(html, same_domain_only=True)
-        assert all('other.com' not in d.url for d in result.downloads)
+        assert all('other.example' not in d.url for d in result.downloads)
 
     def test_keeps_links_on_bare_host_when_seed_is_www(self):
         # A www. seed that redirects to its bare host; a strict host match dropped every link.
@@ -262,9 +262,9 @@ class TestIsSameDomain:
         assert _is_same_domain(url, seed_host) is True
 
     @pytest.mark.parametrize('url, seed_host', [
-        ('https://other.com/a', 'example.com'),
+        ('https://other.example/a', 'example.com'),
         ('https://sub.example.com/a', 'example.com'),
-        ('https://example.com.evil.io/a', 'example.com'),
+        ('https://example.com.evil.example/a', 'example.com'),
     ])
     def test_other_hosts_are_off_domain(self, url, seed_host):
         assert _is_same_domain(url, seed_host) is False

@@ -116,7 +116,7 @@ def test_every_level_lands_in_the_verdict_band_it_names():
 def test_the_llm_judge_scores_links_with_the_profile_wording():
     llm = FakeLLM(lambda user: {'L1': 'clearly_yes', 'L2': 'probably_no', 'L3': 'banana'})
     judge = LLMJudge(llm, load_profile('fund-reports'))
-    links = [{'url': f'https://x.dev/{i}.pdf', 'name': n} for i, n in enumerate(['Havi jelentés 2026-08', 'KID', 'x'])]
+    links = [{'url': f'https://site.example/{i}.pdf', 'name': n} for i, n in enumerate(['Havi jelentés 2026-08', 'KID', 'x'])]
     assert judge.relevance('goal', 'page', links) == [LEVELS['clearly_yes'], LEVELS['probably_no'], None]
     assert load_profile('fund-reports').relevance['false'] in llm.prompts[0]
 
@@ -124,20 +124,20 @@ def test_the_llm_judge_scores_links_with_the_profile_wording():
 def test_neighbours_are_context_and_not_judged():
     llm = FakeLLM(lambda user: {'L1': 'probably_yes'})
     judge = LLMJudge(llm)
-    judge.relevance('goal', 'page', [{'url': 'https://x.dev/new.pdf', 'name': 'Letöltés'}],
-                    neighbours=[{'url': 'https://x.dev/aug.pdf', 'name': '2026. augusztusi jelentés'}])
+    judge.relevance('goal', 'page', [{'url': 'https://site.example/new.pdf', 'name': 'Letöltés'}],
+                    neighbours=[{'url': 'https://site.example/aug.pdf', 'name': '2026. augusztusi jelentés'}])
     assert 'N1' in llm.prompts[0] and '2026. augusztusi jelentés' in llm.prompts[0]
 
 
 def test_candidates_are_asked_in_batches():
     llm = FakeLLM(lambda user: {f'L{i}': 'unsure' for i in range(1, 21)})
-    scores = LLMJudge(llm).relevance('g', 'p', [{'url': f'https://x.dev/{i}.pdf'} for i in range(45)])
+    scores = LLMJudge(llm).relevance('g', 'p', [{'url': f'https://site.example/{i}.pdf'} for i in range(45)])
     assert len(scores) == 45 and llm.usage.requests == 3
 
 
 def test_page_kinds_outside_the_profile_fall_back_to_other():
     llm = FakeLLM(lambda user: {'L1': {'kind': 'document_listing', 'sure': 'sure'}, 'L2': {'kind': 'shop'}})
-    kinds = LLMJudge(llm).page_kinds('g', [{'url': 'https://x.dev/docs'}, {'url': 'https://x.dev/shop'}])
+    kinds = LLMJudge(llm).page_kinds('g', [{'url': 'https://site.example/docs'}, {'url': 'https://site.example/shop'}])
     assert kinds == [('document_listing', 0.9), ('other', 0.0)]
 
 
@@ -174,13 +174,13 @@ class BreakingJudge:
 def test_the_fallback_answers_the_call_during_which_jev_broke():
     secondary = LLMJudge(FakeLLM(lambda user: {'L1': 'clearly_yes'}))
     judge = FallbackJudge(BreakingJudge(), secondary)
-    assert judge.relevance('g', 'p', [{'url': 'https://x.dev/a.pdf'}]) == [LEVELS['clearly_yes']]
+    assert judge.relevance('g', 'p', [{'url': 'https://site.example/a.pdf'}]) == [LEVELS['clearly_yes']]
     assert not judge.open and judge.model == 'jev-x, then fake-model (no_credits)'
 
 
 def test_without_a_fallback_the_judge_opens_with_jev():
     judge = FallbackJudge(BreakingJudge(), None)
-    judge.relevance('g', 'p', [{'url': 'https://x.dev/a.pdf'}])
+    judge.relevance('g', 'p', [{'url': 'https://site.example/a.pdf'}])
     assert judge.open and judge.unavailable_reason == 'no_credits'
 
 

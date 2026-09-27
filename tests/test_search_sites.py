@@ -128,7 +128,7 @@ class TestSearchSites:
     def test_happy_path_returns_results(self):
         results_data = [
             {'url': 'https://example.com', 'title': 'Example', 'snippet': 'Good site.'},
-            {'url': 'https://other.com/reports', 'title': 'Other', 'snippet': 'Another site.'},
+            {'url': 'https://other.example/reports', 'title': 'Other', 'snippet': 'Another site.'},
         ]
         client = self._client(_make_llm_response(results_data))
         results = search_sites(client, 'claude-haiku-4-5-20251001', 'find reports', 5)
@@ -137,7 +137,7 @@ class TestSearchSites:
         assert all(r.snippet_is_synthesized is True for r in results)
         urls = [r.url for r in results]
         assert 'https://example.com' in urls
-        assert 'https://other.com/reports' in urls
+        assert 'https://other.example/reports' in urls
 
     def test_max_results_1_caps_output_and_scales_tokens(self):
         results_data = [
@@ -211,10 +211,10 @@ class TestSearchSites:
         error_block.type = 'web_search_tool_result'
         error_block.content = 'error_object'  # not a list
 
-        good_results = [{'url': 'https://good.com', 'title': 'Good', 'snippet': 'Fine.'}]
+        good_results = [{'url': 'https://good.example', 'title': 'Good', 'snippet': 'Fine.'}]
         good_block = _make_search_block(good_results)
         text_block = _make_text_block(json.dumps([
-            {'title': 'Good', 'url': 'https://good.com', 'snippet': 'Fine.'}
+            {'title': 'Good', 'url': 'https://good.example', 'snippet': 'Fine.'}
         ]))
 
         resp = MagicMock()
@@ -224,7 +224,7 @@ class TestSearchSites:
         client = self._client(resp)
         results = search_sites(client, 'claude-haiku-4-5-20251001', 'goal', 5)
         assert len(results) == 1
-        assert results[0].url == 'https://good.com'
+        assert results[0].url == 'https://good.example'
 
     def test_json_parse_failure_returns_empty(self):
         resp = MagicMock()
@@ -444,7 +444,7 @@ class TestSearchSitesIntegration:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         results_data = [
             {'url': 'http://10.0.0.1/', 'title': 'Internal', 'snippet': 'Bad.'},
-            {'url': 'https://safe.com', 'title': 'Safe', 'snippet': 'Good.'},
+            {'url': 'https://safe.example', 'title': 'Safe', 'snippet': 'Good.'},
         ]
         mock_resp = _make_llm_response(results_data)
 
@@ -455,4 +455,4 @@ class TestSearchSitesIntegration:
         assert resp.status_code == 200
         urls = [r['url'] for r in resp.json()['results']]
         assert 'http://10.0.0.1/' not in urls
-        assert 'https://safe.com' in urls
+        assert 'https://safe.example' in urls

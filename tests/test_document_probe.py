@@ -31,7 +31,7 @@ def probe_answering(documents: set[str]) -> DocumentProbe:
 
 
 def links(prefix: str, n: int, path: str) -> list[dict]:
-    return [{'url': f'https://x.de/{prefix}?id={i}', 'name': f'{prefix} {i}', 'path': path} for i in range(n)]
+    return [{'url': f'https://site-de.example/{prefix}?id={i}', 'name': f'{prefix} {i}', 'path': path} for i in range(n)]
 
 
 class TestSort:
@@ -51,7 +51,7 @@ class TestSort:
     def test_site_chrome_and_lone_links_are_never_probed(self):
         probe = probe_answering(set())
         menu = links('menu', 9, 'header/nav.main/ul/li/a') + links('legal', 4, 'footer.site/ul/li/a')
-        documents, pages = probe.sort(menu + links('single', 1, 'main/p/a') + [{'url': 'https://x.de/sitemap-page'}])
+        documents, pages = probe.sort(menu + links('single', 1, 'main/p/a') + [{'url': 'https://site-de.example/sitemap-page'}])
         assert documents == [] and len(pages) == 15 and probe.asked == []
 
     def test_a_page_cannot_spend_more_than_its_share(self):

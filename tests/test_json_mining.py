@@ -28,23 +28,23 @@ class TestRecords:
 
 class TestPrefixes:
     def test_a_rendered_link_teaches_what_the_site_prepends(self):
-        assert learn_prefixes(['https://x.hu/download/hu-hu/factsheet/1/Factsheet-FundA.PDF'],
+        assert learn_prefixes(['https://site-hu.example/download/hu-hu/factsheet/1/Factsheet-FundA.PDF'],
                               ['/hu-hu/factsheet/1/Factsheet-FundA.PDF']) == {'/download'}
-        assert learn_prefixes(['https://x.hu/hu-hu/factsheet/1/Factsheet-FundA.PDF'],
+        assert learn_prefixes(['https://site-hu.example/hu-hu/factsheet/1/Factsheet-FundA.PDF'],
                               ['/hu-hu/factsheet/1/Factsheet-FundA.PDF']) == set()
 
     def test_a_prefix_learned_on_one_page_applies_to_the_next(self):
         memory: set[str] = set()
-        candidates_from_json(SPA_JSON, 'https://x.hu/fund/a', ['https://x.hu/download/hu-hu/kid/2/KID.PDF'], memory)
-        later = candidates_from_json(SPA_JSON, 'https://x.hu/szakirodalom', [], memory)   # the SPA renders no links
+        candidates_from_json(SPA_JSON, 'https://site-hu.example/fund/a', ['https://site-hu.example/download/hu-hu/kid/2/KID.PDF'], memory)
+        later = candidates_from_json(SPA_JSON, 'https://site-hu.example/szakirodalom', [], memory)   # the SPA renders no links
         urls = {c['url'] for c in later}
-        assert 'https://x.hu/download/hu-hu/factsheet/1/Factsheet-FundA.PDF' in urls
-        assert 'https://x.hu/hu-hu/factsheet/1/Factsheet-FundA.PDF' not in urls   # the bare path is the app shell
+        assert 'https://site-hu.example/download/hu-hu/factsheet/1/Factsheet-FundA.PDF' in urls
+        assert 'https://site-hu.example/hu-hu/factsheet/1/Factsheet-FundA.PDF' not in urls   # the bare path is the app shell
 
 
 class TestCandidates:
     def test_absolute_urls_pass_through_and_relative_ones_are_joined(self):
-        urls = {c['url'] for c in candidates_from_json(SPA_JSON, 'https://x.hu/szakirodalom', [])}
+        urls = {c['url'] for c in candidates_from_json(SPA_JSON, 'https://site-hu.example/szakirodalom', [])}
         assert 'https://cdn.example.net/content/abc/original/Factsheet-FundA.PDF?download=true' in urls
-        assert 'https://x.hu/hu-hu/factsheet/1/Factsheet-FundA.PDF' in urls
-        assert all(c['path'] == 'json' for c in candidates_from_json(SPA_JSON, 'https://x.hu/', []))
+        assert 'https://site-hu.example/hu-hu/factsheet/1/Factsheet-FundA.PDF' in urls
+        assert all(c['path'] == 'json' for c in candidates_from_json(SPA_JSON, 'https://site-hu.example/', []))

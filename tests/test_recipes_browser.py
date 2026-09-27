@@ -28,7 +28,7 @@ def page():
 
 def test_a_select_then_click_recipe_reveals_what_the_agent_revealed(page):
     page.set_content(PAGE)
-    recipe = Recipe(host='x.hu', path='/p', goal='g', revealed=1, steps=[
+    recipe = Recipe(host='site-hu.example', path='/p', goal='g', revealed=1, steps=[
         RecipeStep(action='select', role='combobox', name='Év', attributes={'id': 'yr'}, value='2026'),
         RecipeStep(action='click', role='button', name='Keresés')])
     assert replay(page, recipe, settle=lambda: page.wait_for_timeout(100)) == 2
@@ -37,6 +37,6 @@ def test_a_select_then_click_recipe_reveals_what_the_agent_revealed(page):
 
 def test_a_missing_element_stops_the_replay(page):
     page.set_content(PAGE)
-    recipe = Recipe(host='x.hu', path='/p', goal='g', revealed=1, steps=[
+    recipe = Recipe(host='site-hu.example', path='/p', goal='g', revealed=1, steps=[
         RecipeStep(action='click', role='button', name='Nincs ilyen'), RecipeStep(action='click', role='button', name='Keresés')])
     assert replay(page, recipe, settle=lambda: None) == 0

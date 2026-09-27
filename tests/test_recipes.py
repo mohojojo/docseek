@@ -26,7 +26,7 @@ class TestRecording:
         # as the agent really did it on a bank site: select year, search, record, scroll, a next-page click the
         # page refused, done. Only the select and the search are the recipe.
         NEXT = {'ml_id': '120', 'role': 'button', 'name': 'Következő oldal', 'html_tag': 'button', 'attributes': {}}
-        recipe = recipe_from_steps('https://x.hu/p', 'g', steps(
+        recipe = recipe_from_steps('https://site-hu.example/p', 'g', steps(
             ('select_option', {'ml_id': '94', 'value': '2026'}), ('click', {'ml_id': '96'}),
             ('record_downloads', {'items': []}), ('scroll_to_load', {}), ('click', {'ml_id': '120'}), ('done', {})),
             [YEAR, SEARCH, None, None, NEXT, None], revealed=9,
@@ -38,7 +38,7 @@ class TestRecording:
         # selected in it: on replay the select opens the dropdown itself and the clicks would toggle it shut
         TYPE = {'ml_id': '92', 'role': 'button', 'name': 'Dokumentum típus', 'html_tag': 'button',
                 'attributes': {'class': 'sf-select__button'}}
-        recipe = recipe_from_steps('https://x.hu/p', 'g', steps(
+        recipe = recipe_from_steps('https://site-hu.example/p', 'g', steps(
             ('click', {'ml_id': '92'}), ('click', {'ml_id': '7'}), ('select_option', {'ml_id': '7', 'value': '2026'}),
             ('click', {'ml_id': '9'})), [TYPE, YEAR, YEAR, SEARCH], revealed=9)
         assert [(s.action, s.name) for s in recipe.steps] == [('select', 'Év'), ('click', 'Keresés')]
@@ -46,12 +46,12 @@ class TestRecording:
     def test_a_per_load_id_is_not_kept(self):
         el = {'ml_id': '94', 'role': 'button', 'name': 'Év', 'html_tag': 'button',
               'attributes': {'id': 'f4d77604-f739-4f13-85ba-8bafe4333925-btn', 'class': 'sf-select__button'}}
-        recipe = recipe_from_steps('https://x.hu/p', 'g', steps(('select_option', {'ml_id': '94', 'value': '2026'})), [el], 9)
+        recipe = recipe_from_steps('https://site-hu.example/p', 'g', steps(('select_option', {'ml_id': '94', 'value': '2026'})), [el], 9)
         assert recipe.steps[0].attributes == {'class': 'sf-select__button', 'tag': 'button'}
 
     def test_an_escalation_that_revealed_nothing_leaves_no_recipe(self):
-        assert recipe_from_steps('https://x.hu/p', 'g', steps(('click', {'ml_id': '9'})), [SEARCH], revealed=0) is None
-        assert recipe_from_steps('https://x.hu/p', 'g', steps(('done', {})), [None], revealed=3) is None
+        assert recipe_from_steps('https://site-hu.example/p', 'g', steps(('click', {'ml_id': '9'})), [SEARCH], revealed=0) is None
+        assert recipe_from_steps('https://site-hu.example/p', 'g', steps(('done', {})), [None], revealed=3) is None
 
 
 class TestStore:
