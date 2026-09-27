@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "docseek"
-version = "0.2.0"
+version = "0.3.0"
 description = "Goal-driven document discovery: give it a website and a goal, get back the documents the goal asks for, each with a relevance verdict."
 readme = "README.md"
 license = "Apache-2.0"
