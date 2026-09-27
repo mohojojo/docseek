@@ -5,7 +5,7 @@ import pytest
 
 from docseek.jev_crawl import year_of
 from docseek.models import AgenticCrawlResult, AgenticDownload
-from docseek.series import apply_latest, mark_latest, period_end, period_of, series_key
+from docseek.series import apply_latest, mark_latest, order_of, period_of, series_key
 
 
 class TestPeriod:
@@ -48,11 +48,6 @@ class TestPeriod:
 
     def test_a_finer_reading_wins(self):
         assert period_of('Annual report 2025 - March 2026 update') == '2026-03'
-
-    def test_periods_compare_by_their_last_month(self):
-        assert period_end('2026-Q1') == period_end('2026-03')
-        assert period_end('2025') == period_end('2025-H2') == period_end('2025-12')
-        assert period_end('2026-01') > period_end('2025')
 
     def test_the_year_facet_still_ignores_case_numbers(self):
         assert year_of('HAT-450-7/2026. (HAT-15402/2025.)') is None
@@ -99,9 +94,32 @@ class TestLatest:
         assert [d.url for d in superseded] == ['https://s.example/fund-a-2026-02.pdf']
         assert [d.latest_in_series for d in docs] == [False, True, True, None]
 
-    def test_a_quarter_and_its_last_month_tie_and_both_stay(self):
+    def test_a_series_that_mixes_formats_keeps_everything(self):
         docs = [doc('https://s.example/r-2026-Q1.pdf'), doc('https://s.example/r-2026-03.pdf')]
         assert series_key(docs[0].url) == series_key(docs[1].url) and mark_latest(docs) == []
+        assert [d.latest_in_series for d in docs] == [None, None]
+
+    def test_numbers_order_a_series_without_being_interpreted(self):
+        # issue numbers, case numbers and months all order the same way when a series writes them the same way
+        for urls in (['eb202507.en.pdf', 'eb202508.en.pdf', 'eb202412.en.pdf'],
+                     ['san-2025-11.pdf', 'san-2025-12.pdf', 'san-2024-10.pdf'],
+                     ['bericht_11.2025.pdf', 'bericht_12.2025.pdf', 'bericht_01.2025.pdf']):
+            docs = [doc(f'https://s.example/{u}') for u in urls]
+            mark_latest(docs)
+            assert [d.latest_in_series for d in docs] == [False, True, False], urls
+
+    def test_the_year_comes_first_wherever_the_name_puts_it(self):
+        assert order_of('https://s.example/b-03.2026.pdf')[1] > order_of('https://s.example/b-12.2025.pdf')[1]
+
+    def test_month_words_order_by_month(self):
+        docs = [doc('https://s.example/Havi_jelentes_2026_marcius.pdf'), doc('https://s.example/Havi_jelentes_2026_aprilis.pdf')]
+        mark_latest(docs)
+        assert [d.latest_in_series for d in docs] == [False, True]
+
+    def test_an_unreadable_number_is_kept_not_guessed(self):
+        # '2211' is 2022-11 to a person; code does not guess, so each is its own series and both stay
+        docs = [doc('https://s.example/ALAP-LAP_ETALON-2211.pdf'), doc('https://s.example/ALAP-LAP_ETALON-2212.pdf')]
+        assert mark_latest(docs) == []
 
     def test_a_rejected_document_supersedes_nothing(self):
         docs = [doc('https://s.example/fund-a-2026-02.pdf'), doc('https://s.example/fund-a-2026-03.pdf', 'rejected')]
@@ -137,22 +155,8 @@ def test_the_api_marks_every_response_and_filters_on_request(monkeypatch):
     assert [d['period'] for d in latest['downloads']] == ['2026-03'] and latest['superseded_count'] == 1
 
 
-class TestNumberedIssues:
-    @pytest.mark.parametrize('name, url, expected', [
-        ('Economic Bulletin Issue 8, 2025', 'https://s.example/pub/eb202508.en.pdf', ('2025', 8)),
-        ('SAN-2025-12', 'https://s.example/files/2025-12/san-2025-12.pdf', ('2025', 12)),
-        ('Monatsbericht Heft 3', 'https://s.example/2026/heft3.pdf', (None, 3)),     # a year in a folder is not read
-        ('Factsheet No. 3 March 2026', 'https://s.example/f.pdf', ('2026-03', 3)),
-        ('Factsheet March 2026', 'https://s.example/f-2026-03.pdf', ('2026-03', None)),
-    ])
-    def test_a_numbered_issue_is_its_year_and_its_number(self, name, url, expected):
-        from docseek.series import document_period
-        assert document_period(name, url) == expected
 
-    def test_the_latest_issue_is_the_highest_number_of_the_newest_year(self):
-        docs = [doc(f'https://s.example/pub/eb2025{n:02d}.en.pdf', name=f'Economic Bulletin Issue {n}, 2025')
-                for n in (1, 2, 8)]
-        docs.append(doc('https://s.example/pub/eb202408.en.pdf', name='Economic Bulletin Issue 8, 2024'))
-        mark_latest(docs)
-        assert [d.latest_in_series for d in docs] == [False, False, True, False]
-        assert {d.period for d in docs} == {'2025', '2024'}
+def test_product_numbers_are_identity_not_order():
+    # cm4 and cm5 are two products: grouping them would drop one product's datasheet, so they stay apart
+    docs = [doc('https://s.example/cm4-datasheet.pdf'), doc('https://s.example/cm5-datasheet.pdf')]
+    assert mark_latest(docs) == [] and docs[0].series != docs[1].series

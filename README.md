@@ -95,16 +95,21 @@ screenshots need a vision-capable model.
 ## The latest of each series
 
 The relevance judge scores what a document *is*, never which period it covers, so a goal like "each fund's
-latest factsheet" finds the whole archive. Code answers the "latest" part: every document carries a `period`
-facet (`2026-03`, `2026-Q1`, `2026-H1` or `2026`, read from its name and URL in English, German, Hungarian,
-French, Spanish and Italian) and a `series` facet - its file name with the period taken out, or its title when
-the file name says nothing. `latest_in_series` marks the newest of each series. A document its name numbers -
-"Issue 8, 2025", "No. 3", a case code like `SAN-2025-12` - gets its year as the period, and its number orders the
-year's issues, so a URL like `eb202508` is not read as August.
+latest factsheet" finds the whole archive. Code answers the "latest" part. Every document carries a `series` facet -
+its file name with the date taken out, or its title when the file name says nothing - and `latest_in_series` marks
+the newest of each series.
 
 Set `"latest": true` (CLI `--latest`) to keep only those: older documents of a series are counted in
-`superseded_count` instead of returned. Every series keeps its newest document, however old; documents with no
-readable period are kept, since there is nothing to compare them by.
+`superseded_count` instead of returned. Every series keeps its newest document, however old.
+
+Reading dates out of names will never be right for every site - `2211`, `eb202508`, `SAN-2025-12` and `Heft 3` each
+mean something different - so the filter does not try to. The documents of one series share a naming pattern, and
+they are ordered by the numbers in it (years first) without deciding whether `08` is August or issue 8. **When in
+doubt, nothing is dropped:** a series that mixes formats, or a document with nothing to order by, is kept whole. A
+wrong keep costs a caller one extra document; a wrong drop would lose one.
+
+The `period` facet (`2026-03`, `2026-Q1`, `2026-H1` or `2026`, read in English, German, Hungarian, French, Spanish
+and Italian) is a best-effort label for people and callers, not what the filter decides by.
 
 ## Generated programs
 

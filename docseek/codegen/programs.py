@@ -31,7 +31,7 @@ from ..jev_crawl import year_of
 from ..judge import RelevanceJudge, verdict_for
 from ..models import AgenticCrawlResult, AgenticDownload
 from ..reach import bare_host
-from ..series import document_period
+from ..series import period_of
 from .fetcher import Fetcher
 from .sandbox import run_program
 
@@ -131,7 +131,7 @@ def judge_documents(goal: str, start_url: str, documents: list[dict], judge: Rel
     scores = judge.relevance(goal, f'documents found on {start_url}', candidates) if candidates else []
     return [AgenticDownload(
         url=d['url'], name=d['name'] or d['url'].rsplit('/', 1)[-1], reason='generated program', source_page=start_url,
-        relevance=s, verdict=verdict_for(s), source='program', period=document_period(d['name'], d['url'])[0],
+        relevance=s, verdict=verdict_for(s), source='program', period=period_of(f"{d['name']} {d['url']}"),
         year=year_of(f"{d.get('context', '')} {d['name']} {d['url']}")) for d, s in zip(documents, scores)]
 
 

@@ -1,14 +1,18 @@
 """Periods and series: which document is the newest of its kind, read by code, never by a model.
 
   period_of(text)      '2026-03' | '2026-Q1' | '2026-H1' | '2026' | None, from a document's name and URL
-  document_period(name, url)  (period, sequence number): a numbered issue is its year and its number, not a month
-  period_end(period)   a comparable month index: a quarter, half or year counts as its last month
   series_key(url, name) what stays of a document's identity once its period is taken out
+  order_of(url, name)  what orders the documents of one series, with no interpretation of what the numbers mean
   mark_latest(docs)    sets each document's `series` and `latest_in_series` facets; returns the superseded ones
 
 The relevance judge scores a document's type, never its period (judging the period rejected every target on
-sites that overwrite one file per month), so "the latest report of each fund" is answered here: the documents
-of one series are compared by period, and every series keeps its newest - however old it is.
+sites that overwrite one file per month), so "the latest report of each fund" is answered here, and every series
+keeps its newest - however old it is.
+
+Reading dates out of names will never be right for every site ('2211', 'eb202508', 'SAN-2025-12', 'Heft 3' each
+mean something different), so the two jobs are kept apart. `period` is a best-effort label. The latest filter does
+not use it: the documents of one series share a naming pattern, so they are ordered by the numbers in it without
+deciding what those numbers mean, and a series whose documents cannot be ordered cleanly keeps all of them.
 
 Periods are read in the languages docseek detects goals in (en, de, hu, fr, es, it). A year next to a slash is
 not read: '450-7/2026' is a case number and '/2016/05/' an upload folder, not a period.
@@ -105,45 +109,11 @@ def period_of(text: str) -> str | None:
     return None
 
 
-# A numbered issue or case: 'Issue 8, 2025' (a URL like eb202508 would read as August), 'SAN-2025-12' (decision 12)
-_ISSUE_MARKER = re.compile(r'(?<![a-zà-ÿ])(?:issue|no|nr|number|numéro|numero|número|heft|ausgabe|szám)\.?\s*(\d{1,4})\b'
-                           r'|n[°º]\s*(\d{1,4})\b', re.IGNORECASE)
-_CODE = re.compile(r'(?<![A-Za-z])[A-Z]{2,6}[-_ ](20\d{2})[-_](\d{1,4})(?![\d/])')
-_YEAR = re.compile(rf'{_NO_YEAR_EDGE_BEFORE}{_Y}{_NO_YEAR_EDGE_AFTER}')
-
-
-def document_period(name: str, url: str) -> tuple[str | None, int | None]:
-    """(period, sequence) of a document. When its name numbers it - an issue, a case code - the number is a
-    sequence within the year, never a month: the period is the year, and the sequence orders the year's documents."""
-    name = unquote(name or '')
-    code = _CODE.search(name)
-    if code:
-        return code[1], int(code[2])
-    issue = _ISSUE_MARKER.search(name)
-    if issue:
-        rest = name[:issue.start()] + ' ' + name[issue.end():]
-        year = _YEAR.search(rest) or _YEAR.search(unquote(urlparse(url).path))
-        period = period_of(rest) or (year[1] if year else None)
-        return period, int(issue[1] or issue[2])
-    return period_of(f'{name} {url}'), None
-
-
-def period_end(period: str) -> int:
-    """Months since year 0 at the period's end: 2026-Q1 and 2026-03 compare equal, 2026 is its December."""
-    year, _, part = period.partition('-')
-    if not part:
-        month = 12
-    elif part[0] == 'Q':
-        month = 3 * int(part[1])
-    elif part[0] == 'H':
-        month = 6 * int(part[1])
-    else:
-        month = int(part)
-    return int(year) * 12 + month
-
-
 _GENERIC_NAMES = {'download', 'downloads', 'file', 'files', 'document', 'documents', 'doc', 'view', 'get', 'getfile',
                   'attachment', 'index', 'default', 'pdf', 'show', 'open', 'dl', 'fetch', 'content', 'media', 'asset'}
+_SCRIPT_EXTENSIONS = ('aspx', 'php', 'asp', 'jsp', 'ashx', 'cgi')
+# what varies between the documents of one series: month words and numbers (a q/h prefix marks a quarter/half)
+_TOKEN = re.compile(rf'(?<![{_L}])({_WORDS})[{_L}]*|(?:(?<![a-z0-9])([qh]))?(\d+)', re.IGNORECASE)
 
 
 def _strip_periods(text: str) -> str:
@@ -156,48 +126,69 @@ def _key(text: str) -> str:
     return re.sub(r'[\W_]+', '-', text.lower()).strip('-')
 
 
-def series_key(url: str, name: str = '') -> str:
-    """The document's file name with its period taken out: one key for every month of one fund's factsheet. When
-    the file name says nothing about the document (getfile.aspx?id=12, a hash, 'download'), its name is used."""
+def _identity(url: str, name: str) -> tuple[str, str]:
+    """(text, extension) that identifies a document: its file name, or its name when the file name says nothing
+    (getfile.aspx?id=12, a hash, 'download'). An id after the file name (/documents/1/report.pdf/<uuid>) is skipped."""
     segments = [unquote(seg) for seg in urlparse(url).path.split('/') if seg]
-    # the last segment that looks like a file name: some sites put an id after it (/documents/1/report.pdf/<uuid>)
     filename = next((seg for seg in reversed(segments) if re.search(r'\.[A-Za-z0-9]{2,5}$', seg)),
                     segments[-1] if segments else '')
     stem, dot, ext = filename.rpartition('.')
     stem, ext = (stem, ext.lower()) if dot and len(ext) <= 5 else (filename, '')
     key = _key(_strip_periods(stem.lower()))
     letters = re.sub(r'[^a-zà-ÿőű]', '', key)
-    opaque = (len(letters) < 3 or key in _GENERIC_NAMES or ext in ('aspx', 'php', 'asp', 'jsp', 'ashx', 'cgi')
+    opaque = (len(letters) < 3 or key in _GENERIC_NAMES or ext in _SCRIPT_EXTENSIONS
               or bool(re.fullmatch(r'[0-9a-f-]{16,}', key)))
-    if opaque and name:
-        key = _key(_strip_periods(name.lower()))
-    return f'{key}.{ext}' if ext and ext not in ('aspx', 'php', 'asp', 'jsp', 'ashx', 'cgi') else key
+    text = name if opaque and name else stem
+    return text.lower(), '' if ext in _SCRIPT_EXTENSIONS else ext
+
+
+def series_key(url: str, name: str = '') -> str:
+    """The document's identity with its period taken out: one key for every month of one fund's factsheet."""
+    text, ext = _identity(url, name)
+    key = _key(_strip_periods(text))
+    return f'{key}.{ext}' if ext else key
+
+
+def order_of(url: str, name: str = '') -> tuple[tuple, tuple]:
+    """(shape, key) that orders the documents of one series: the numbers and month words of its identity, four-digit
+    years first. Nothing is interpreted - whether '08' is August or issue 8 does not matter, as long as every
+    document of the series writes it the same way, which `shape` checks."""
+    text, _ = _identity(url, name)
+    years, rest = [], []
+    for m in _TOKEN.finditer(text):
+        if m[1]:
+            rest.append(('m', _MONTH_WORD[m[1].lower()]))
+            continue
+        value = int(m[3])
+        kind = m[2] or ('y' if len(m[3]) == 4 and 1900 <= value <= 2099 else 'n')
+        (years if kind == 'y' else rest).append((kind, value))
+    tokens = years + rest
+    return tuple(kind for kind, _ in tokens), tuple(value for _, value in tokens)
 
 
 def mark_latest(documents: list) -> list:
-    """Set `series` and `latest_in_series` on each AgenticDownload and return the superseded ones.
+    """Set `series`, `latest_in_series` (and a best-effort `period`) on each AgenticDownload; return the superseded.
 
-    latest_in_series is True for the newest of a series (ties included), False for an older one, None when the
-    document has no period (nothing to compare it by - a file a site overwrites each month often has none) or
-    was rejected. Only accepted, unsure or unscored documents can supersede another."""
-    newest: dict[str, tuple[int, int]] = {}
-    order: dict[int, tuple[int, int]] = {}
+    Within a series, documents are ordered by order_of. When in doubt, nothing is dropped: latest_in_series is None
+    - and the document kept - when its series mixes formats (2026-Q1 beside 2026-03), when it has nothing to order
+    by, or when it was rejected. Only accepted, unsure or unscored documents can supersede another."""
+    series: dict[str, list] = {}
     for doc in documents:
-        period, sequence = document_period(doc.name, doc.url)
-        doc.period = doc.period or period
+        doc.period = doc.period or period_of(f'{doc.name} {doc.url}')
         doc.series = series_key(doc.url, doc.name)
-        if doc.period:
-            order[id(doc)] = (period_end(doc.period), sequence or 0)
-            if doc.verdict != 'rejected':
-                newest[doc.series] = max(newest.get(doc.series, (0, 0)), order[id(doc)])
+        doc.latest_in_series = None
+        if doc.verdict != 'rejected':
+            series.setdefault(doc.series, []).append((doc, *order_of(doc.url, doc.name)))
     superseded = []
-    for doc in documents:
-        if not doc.period or doc.verdict == 'rejected':
-            doc.latest_in_series = None
-            continue
-        doc.latest_in_series = order[id(doc)] >= newest[doc.series]
-        if not doc.latest_in_series:
-            superseded.append(doc)
+    for members in series.values():
+        shapes = {shape for _, shape, _ in members}
+        if len(shapes) != 1 or not next(iter(shapes)):
+            continue                                       # mixed formats or nothing to order by: keep them all
+        newest = max(key for _, _, key in members)
+        for doc, _, key in members:
+            doc.latest_in_series = key == newest
+            if not doc.latest_in_series:
+                superseded.append(doc)
     return superseded
 
 
