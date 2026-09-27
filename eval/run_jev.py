@@ -27,17 +27,13 @@ import threading
 import time
 from pathlib import Path
 
-from eval.run_baseline import identity, load_ground_truth, score
+from eval.run_baseline import identity, load_ground_truth, score, start_url_for
 
 _HERE = Path(__file__).resolve().parent
 _REPORTS = _HERE / 'reports'
 _SNAPSHOTS = _HERE / 'snapshots'
 RECALL_AT_PAGES = (10, 20, 40)
 RETURNED_VERDICTS = {'accepted', 'unsure', 'unscored'}
-
-
-def start_url_for(site: str) -> str:
-    return f'https://www.{site}/' if not site.startswith('www.') else f'https://{site}/'
 
 
 def page_of(download, page_numbers: dict[str, int]) -> int:
@@ -187,9 +183,12 @@ def main() -> None:
         load_dotenv(_HERE.parent / '.env', override=False)
     except Exception:
         pass
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    if not api_key or not os.environ.get('TYPESAFE_API_KEY'):
-        print('Missing ANTHROPIC_API_KEY or TYPESAFE_API_KEY.', file=sys.stderr)
+    api_key = os.environ.get('ANTHROPIC_API_KEY')   # None is fine: the agent then runs on LLM_* (docseek.llm)
+    from docseek.judge import JudgeUnavailable, make_judge
+    try:
+        make_judge(args.judge, args.profile)             # fail now, not on every site, when the judge cannot run
+    except (JudgeUnavailable, ValueError) as exc:
+        print(f'No relevance judge: {exc}', file=sys.stderr)
         sys.exit(1)
 
     from docseek.jev_crawl import jev_crawl

@@ -82,9 +82,11 @@ in the report, marked `discarded`, and left out of every summary.
 Reports are written to `eval/reports/`, snapshots to `eval/snapshots/`. Both are ignored by git.
 Keys are read from the environment or from `.env` at the repository root.
 
-### run_jev: the Jev decision layer
+### run_jev: the judge-driven crawl
 
-Needs `ANTHROPIC_API_KEY` and `TYPESAFE_API_KEY`.
+Needs what its judge needs: `TYPESAFE_API_KEY` for `--judge jev` (the default when it is set), or an
+LLM (`LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY`, or `ANTHROPIC_API_KEY`) for `--judge llm`. Escalations to the
+browsing agent run on the same LLM; without one, pass `--no-escalation`.
 
 ```sh
 .venv/bin/python -m eval.run_jev --runs 2                       # every ground-truth file
@@ -118,10 +120,9 @@ Needs an LLM: `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY`, or `ANTHROPIC_API_KE
 .venv/bin/python -m eval.run_baseline --max-pages 15 --model claude-haiku-4-5
 ```
 
-The baseline is simpler than `run_jev`: it always seeds `https://www.<site>/`, stays on the seed
-host, and matches found URLs with the plain rule. It ignores `start_url`, `off_domain`,
-`goal_year` and `profile`, and it applies `match_query` and `identity_re` to the expected side
-only, so sites that need those score low here. Use at least 3 runs to see run-to-run variance.
+It seeds, leaves the seed host and matches documents the way `run_jev` does (`start_url`, `off_domain`,
+`match_query`, `identity_re`). The agent has no relevance judge, so `profile` does not apply, and it scores
+every document it records, with no accepted/returned split. Use at least 3 runs to see run-to-run variance.
 
 ### judge_compare: a relevance judge on a frozen set
 

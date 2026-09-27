@@ -28,6 +28,10 @@ _GROUND_TRUTH = _HERE / 'ground_truth'
 _REPORTS = _HERE / 'reports'
 
 
+def start_url_for(site: str) -> str:
+    return f'https://www.{site}/' if not site.startswith('www.') else f'https://{site}/'
+
+
 def identity(url: str, keep_query: bool = False, identity_re: str | None = None) -> str:
     """normalize_url, unless the site declares what identifies a document (`identity_re`, one group): some
     sites serve one document as ?download=N:slug, ?download=N:slug&start=50 and /file/N-slug."""
@@ -108,9 +112,7 @@ def score(found: set[str], expected: set[str]) -> dict:
 
 def run_one(agentic_crawl, entry: dict, api_key: str, model: str,
             max_pages: int, max_depth: int) -> dict:
-    site = entry['site']
-    start_url = f'https://www.{site}/' if not site.startswith('www.') else f'https://{site}/'
-    # most hosts resolve fine with www.; www.-less hosts still redirect.
+    start_url = entry.get('start_url') or start_url_for(entry['site'])
     t0 = time.time()
     downloads_seen: list[str] = []
 
@@ -125,11 +127,11 @@ def run_one(agentic_crawl, entry: dict, api_key: str, model: str,
         model=model,
         max_pages=max_pages,
         max_depth=max_depth,
-        same_domain_only=True,   # baseline uses the current default
+        same_domain_only=not entry.get('off_domain'),
         on_event=on_event,
         enable_learning=False,   # baseline must not mutate the pattern store between runs
     )
-    found = {normalize_url(d.url) for d in result.downloads}
+    found = {identity(d.url, entry.get('keep_query', False), entry.get('identity_re')) for d in result.downloads}
     sc = score(found, entry['expected'])
     sc.update({
         'elapsed_s': round(time.time() - t0, 1),

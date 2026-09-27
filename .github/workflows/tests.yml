@@ -13,5 +13,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv python install 3.12
       - run: uv venv && uv pip install -e ".[dev]"
+      - run: uv run ruff check .
       - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -q
