@@ -89,10 +89,10 @@ def extract_and_save(
     goal: str = '',
 ) -> None:
     """Extract patterns from a completed crawl and persist them. Swallows all exceptions."""
-    print(f'[patterns] extracting patterns for {domain}...', flush=True)
+    logger.debug('[patterns] extracting patterns for %s', domain)
     try:
         patterns = extract_patterns(domain, steps, final_memory, crawl_plan, llm, goal=goal)
         store.merge_and_save(domain, patterns)
-        print(f'[patterns] saved → {domain}.json  (crawl #{patterns.successful_crawl_count})', flush=True)
+        logger.info('[patterns] saved %s.json (crawl #%d)', domain, patterns.successful_crawl_count)
     except Exception as exc:
-        print(f'[patterns] extraction failed for {domain}: {exc}', flush=True)
+        logger.warning('[patterns] extraction failed for %s: %s', domain, exc)

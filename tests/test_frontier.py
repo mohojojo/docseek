@@ -19,8 +19,8 @@ def drain(frontier: Frontier, pays: dict[str, int], n: int) -> list[str]:
 
 class TestTierPolicy:
     def test_it_orders_exactly_like_the_shipped_key(self):
-        links = [('a', 'news_or_article', 0.9, 'g'), ('b', 'subject_page', 0.8, 'g'),
-                 ('c', 'subject_page', 0.99, 'g'), ('d', 'category_or_overview', 1.0, 'g')]
+        links = [('a', 'news_or_article', 0.9, 'g'), ('b', 'fund_or_product', 0.8, 'g'),
+                 ('c', 'fund_or_product', 0.99, 'g'), ('d', 'category_or_overview', 1.0, 'g')]
         frontier = Frontier('tier')
         fill(frontier, links)
         expected = sorted(links, key=lambda l: frontier_key(l[1], l[2], 0, False, links.index(l)))
@@ -29,8 +29,8 @@ class TestTierPolicy:
 
 class TestBanditPolicy:
     # a confident menu of empty fund overviews, and a report table that pays
-    MENU = [(f'menu{i}', 'subject_page', 0.99, 'nav/ul/li/a') for i in range(6)]
-    TABLE = [(f'table{i}', 'subject_page', 0.88, 'table/tr/td/a') for i in range(6)]
+    MENU = [(f'menu{i}', 'fund_or_product', 0.99, 'nav/ul/li/a') for i in range(6)]
+    TABLE = [(f'table{i}', 'fund_or_product', 0.88, 'table/tr/td/a') for i in range(6)]
     PAYS = {f'table{i}': 30 for i in range(6)}
 
     def test_a_paying_group_is_reached_and_then_kept(self):
@@ -56,7 +56,7 @@ class TestBanditPolicy:
         frontier = Frontier('bandit')
         fill(frontier, [('hub', 'category_or_overview', 0.9, 'cards/a')])
         hub, _, _ = frontier.pop()
-        frontier.add('fund', kind='subject_page', probability=0.9, depth=0, group='grid/a', parent=hub)
+        frontier.add('fund', kind='fund_or_product', probability=0.9, depth=0, group='grid/a', parent=hub)
         frontier.add('legal', kind='company_or_legal', probability=0.9, depth=0, group='footer/a', parent=hub)
         frontier.record(hub, 0)
         assert frontier.groups['cards/a'].reward > 0          # the fund grid counts, the footer does not
@@ -70,8 +70,8 @@ class TestBanditPolicy:
 
 
 class TestRescuePolicy:
-    MENU = [(f'menu{i}', 'subject_page', 0.99, 'nav/ul/li/a') for i in range(12)]
-    TABLE = [(f'table{i}', 'subject_page', 0.88, 'table/tr/td/a') for i in range(6)]
+    MENU = [(f'menu{i}', 'fund_or_product', 0.99, 'nav/ul/li/a') for i in range(12)]
+    TABLE = [(f'table{i}', 'fund_or_product', 0.88, 'table/tr/td/a') for i in range(6)]
 
     def test_a_crawl_that_pays_never_leaves_the_shipped_order(self):
         links = self.MENU + self.TABLE

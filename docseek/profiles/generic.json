@@ -5,7 +5,7 @@
     "false": "The linked document is a different kind of document than the goal asks for, even when it is about the same subject and period (for example a different report type, a summary or notice about it, a form, a policy, a key information document, or a listing page), or it is the same document translated into a language other than the language the goal is written in."
   },
   "page_kinds": {
-    "subject_page": "A page about one subject of the kind the goal is about - one fund, product, company, issuer, meeting, case or filing - which usually lists that subject's own documents.",
+    "fund_or_product": "A page about one subject of the kind the goal is about - one fund, product, company, issuer, meeting, case or filing - which usually lists that subject's own documents.",
     "document_listing": "A page that lists many documents (reports, announcements, disclosures, downloads).",
     "category_or_overview": "A page that groups or lists such subjects, without their documents.",
     "news_or_article": "A news item, blog post, press release or article.",

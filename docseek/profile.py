@@ -17,7 +17,10 @@ from pathlib import Path
 
 PROFILES_DIR = Path(__file__).resolve().parent / 'profiles'
 DEFAULT_PROFILE = 'generic'
-PAGE_KIND_IDS = ('subject_page', 'document_listing', 'category_or_overview', 'news_or_article',
+# The ids are part of what the judge reads, not just keys: Jev ranks pages by the label as well as its description,
+# so 'fund_or_product' covers any subject page (see the profiles' wording). Renaming an id changes the crawl -
+# re-run the eval before you do.
+PAGE_KIND_IDS =('fund_or_product', 'document_listing', 'category_or_overview', 'news_or_article',
                  'company_or_legal', 'other')
 
 

@@ -50,7 +50,7 @@ _PARALLEL_REQUESTS = 6
 Q_RELEVANCE = 'Is link {cid} a document that the goal asks for?'
 
 # --- page kind: ranks the Frontier; the ids are fixed, the Profile describes them ---------------
-KIND_TIER = {'subject_page': 1, 'document_listing': 1, 'category_or_overview': 2, 'other': 2,
+KIND_TIER = {'fund_or_product': 1, 'document_listing': 1, 'category_or_overview': 2, 'other': 2,
              'news_or_article': 3, 'company_or_legal': 3}
 
 # --- filter values ----------------------------------------------------------------------------

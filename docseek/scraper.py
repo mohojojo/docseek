@@ -733,7 +733,7 @@ def _try_dismiss_form_disclaimer(page, wait_ms: int = 500) -> bool:
         filled = result.get('filled', 0) if isinstance(result, dict) else 0
         clicked = result.get('clickedText') if isinstance(result, dict) else None
         fallback_el = result.get('fallbackEl') if isinstance(result, dict) else None
-        print(f'[DEBUG dismiss_modal] filled={filled} clicked={clicked!r} fallbackEl={fallback_el!r}', flush=True)
+        logger.debug('dismiss_modal: filled=%s clicked=%r fallbackEl=%r', filled, clicked, fallback_el)
         if filled or clicked:
             logger.info('[dismiss_modal] filled=%d selects, clicked=%r', filled, clicked)
             page.wait_for_timeout(wait_ms)
@@ -793,7 +793,7 @@ def _try_accept_cookies(page, wait_ms: int = 1500) -> bool:
     """Click a cookie-consent accept button if one is present; return True if clicked."""
     try:
         clicked_text = page.evaluate(_COOKIE_ACCEPT_JS)
-        print(f'[DEBUG cookies] clicked={clicked_text!r}', flush=True)
+        logger.debug('dismiss_cookies: clicked=%r', clicked_text)
         if clicked_text:
             logger.info('[cookies] clicked accept button: %r', clicked_text)
             try:

@@ -72,7 +72,7 @@ class TestLinkState:
         client = JevClient(api_key='test-key')
         sent = {}
         ok = MagicMock(status_code=200)
-        ok.json.return_value = {'answers': {'q1': {'choice': 'subject_page', 'probabilities': {'subject_page': 1.0}}},
+        ok.json.return_value = {'answers': {'q1': {'choice': 'fund_or_product', 'probabilities': {'fund_or_product': 1.0}}},
                                 'usage': {'input_tokens': 5, 'output_tokens': 1}}
 
         def capture(url, headers=None, json=None):
@@ -160,7 +160,7 @@ class TestFrontierOrdering:
     def test_fund_and_listing_outrank_news_and_legal(self):
         items = [
             ('legal', frontier_key('company_or_legal', 1.0, 0, False, 0)),
-            ('fund', frontier_key('subject_page', 0.9, 2, False, 1)),
+            ('fund', frontier_key('fund_or_product', 0.9, 2, False, 1)),
             ('news', frontier_key('news_or_article', 1.0, 0, False, 2)),
             ('listing', frontier_key('document_listing', 0.9, 1, False, 3)),
             ('category', frontier_key('category_or_overview', 1.0, 0, False, 4)),
@@ -170,16 +170,16 @@ class TestFrontierOrdering:
 
     def test_goal_language_comes_first_even_for_a_better_kind(self):
         items = [
-            ('english fund page', frontier_key('subject_page', 1.0, 0, True, 0)),
+            ('english fund page', frontier_key('fund_or_product', 1.0, 0, True, 0)),
             ('hungarian news page', frontier_key('news_or_article', 0.5, 3, False, 1)),
         ]
         assert self._order(items)[0] == 'hungarian news page'
 
     def test_probability_then_depth_breaks_ties(self):
         items = [
-            ('deep', frontier_key('subject_page', 1.0, 3, False, 0)),
-            ('shallow', frontier_key('subject_page', 1.0, 1, False, 1)),
-            ('unsure kind', frontier_key('subject_page', 0.4, 0, False, 2)),
+            ('deep', frontier_key('fund_or_product', 1.0, 3, False, 0)),
+            ('shallow', frontier_key('fund_or_product', 1.0, 1, False, 1)),
+            ('unsure kind', frontier_key('fund_or_product', 0.4, 0, False, 2)),
         ]
         assert self._order(items) == ['shallow', 'deep', 'unsure kind']
 
@@ -287,7 +287,7 @@ class TestCrawlDepth:
 
         from docseek.jev_crawl import canonical
         seed, a, b, c = (f'https://x.dev/{p}' for p in ('', 'a', 'b', 'c'))
-        kind = {'kind': 'subject_page', 'probability': 0.9}
+        kind = {'kind': 'fund_or_product', 'probability': 0.9}
         links = {seed: [a], a: [b], b: [c], c: []}
         return SimpleNamespace(
             goal='Find the monthly fund reports', seed=seed, sitemap=[], verdict={}, pre_crawl=set(), expected=set(),
@@ -692,16 +692,16 @@ class TestEscalationTrigger:
         assert self._trigger(docs=0, typed_form=True, hidden=0.0, crawl_accepted=144) is None
 
     def test_an_empty_page_needs_high_confidence(self):
-        assert self._trigger(kind='subject_page', docs=0, new_pages=0, accepted=0,
+        assert self._trigger(kind='fund_or_product', docs=0, new_pages=0, accepted=0,
                              has_filter=False, hidden=0.85) is None
-        assert self._trigger(kind='subject_page', docs=0, new_pages=0, accepted=0,
+        assert self._trigger(kind='fund_or_product', docs=0, new_pages=0, accepted=0,
                              has_filter=False, hidden=0.95) == 'empty_page'
 
     def test_an_empty_page_of_another_kind_is_not_looked_at(self):
         # empty-page escalations on agenda and proposal pages returned nothing
         assert self._trigger(kind='other', docs=0, new_pages=0, accepted=0,
                              has_filter=False, hidden=0.95) is None
-        assert self._trigger(kind='subject_page', docs=0, new_pages=0, accepted=0,
+        assert self._trigger(kind='fund_or_product', docs=0, new_pages=0, accepted=0,
                              has_filter=False, hidden=0.95, crawl_accepted=3) is None
 
     def test_a_filtered_listing_still_escalates_late_in_a_crawl(self):
@@ -730,12 +730,12 @@ class TestProfiles:
         fund = load_profile('fund-reports')
         assert 'monthly report, factsheet or product sheet about one fund' in fund.relevance['true']
         assert 'an annual or semi-annual report' in fund.relevance['false']
-        assert 'one fund, product or portfolio' in fund.page_kinds['subject_page']
+        assert 'one fund, product or portfolio' in fund.page_kinds['fund_or_product']
 
     def test_the_generic_page_kinds_describe_any_subject(self):
         from docseek.profile import PAGE_KIND_IDS, load_profile
         generic = load_profile('generic')
-        assert 'company' in generic.page_kinds['subject_page']
+        assert 'company' in generic.page_kinds['fund_or_product']
         assert tuple(generic.page_kinds) == PAGE_KIND_IDS
 
     def test_a_profile_can_be_a_file(self, tmp_path):

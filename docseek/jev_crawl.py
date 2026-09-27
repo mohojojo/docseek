@@ -424,7 +424,7 @@ def _escalation_trigger(judge, goal, url, title, kind, docs, new_pages, accepted
         return 'filtered_listing'
     # a page with nothing harvested is worth one cheap look, but only when Jev is confident and the
     # page is of a kind that lists documents
-    if not docs and hidden >= 0.9 and kind in ('document_listing', 'subject_page') and not crawl_accepted:
+    if not docs and hidden >= 0.9 and kind in ('document_listing', 'fund_or_product') and not crawl_accepted:
         return 'empty_page'
     return None
 

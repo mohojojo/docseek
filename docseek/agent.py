@@ -1144,7 +1144,7 @@ def _visit_page(
                             url=href,
                         )
                         added += 1
-                    print(f'[raw-links] {url}: {len(raw_links)} total, {added} added', flush=True)
+                    logger.debug('[raw-links] %s: %d total, %d added', url, len(raw_links), added)
                 except Exception as exc:
                     logger.warning('Raw link collection failed on %s: %s', url, exc)
 
@@ -1167,16 +1167,6 @@ def _visit_page(
                 from .scraper import capture_screenshot
                 b64 = capture_screenshot(page, max_width=None if canvas_mode else 800)
                 if b64:
-                    if canvas_mode:
-                        import base64 as _b64, re as _re
-                        slug = _re.sub(r'[^\w]', '_', url)[:60]
-                        debug_path = f'/tmp/canvas_debug_{slug}.png'
-                        try:
-                            with open(debug_path, 'wb') as _f:
-                                _f.write(_b64.b64decode(b64))
-                            print(f'[canvas] debug screenshot → {debug_path}', flush=True)
-                        except Exception:
-                            pass
                     initial_content = [
                         {'type': 'text', 'text': context_str},
                         {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/png', 'data': b64}},
@@ -1698,12 +1688,12 @@ def agentic_crawl(
             'url_patterns_prefer': crawl_plan.url_patterns_prefer,
             'url_patterns_skip': crawl_plan.url_patterns_skip,
         })
-    print(f'[plan] doc_types={crawl_plan.doc_types} key_terms={crawl_plan.key_terms}', flush=True)
+    logger.debug('[plan] doc_types=%s key_terms=%s', crawl_plan.doc_types, crawl_plan.key_terms)
 
     # Pre-crawl: sitemap (Unit 3)
     sitemap_urls = fetch_sitemap(start_url)
     if sitemap_urls:
-        print(f'[sitemap] found {len(sitemap_urls)} URLs', flush=True)
+        logger.info('[sitemap] found %d URLs', len(sitemap_urls))
 
     queue: list[tuple[str, int]] = [(start_url, 0)]
     visited: set[str] = set()
@@ -1741,7 +1731,7 @@ def agentic_crawl(
                 if on_event:
                     on_event({'type': 'agent_download', 'url': dl.url, 'name': dl.name})
         if mined:
-            print(f'[api_mining] recorded {len(mined)} document(s) from backend API', flush=True)
+            logger.info('[api_mining] recorded %d document(s) from backend API', len(mined))
     except Exception as exc:
         logger.warning('[api_mining] pre-crawl mining failed: %s', exc)
 

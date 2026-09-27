@@ -284,7 +284,7 @@ def discover_stream(
                 'model': llm.model,
                 'decision_layer': payload.decision_layer or 'default (jev when configured)',
             }
-            print('[crawler] discover-stream config:', config_event, flush=True)
+            logger.debug('[docseek] discover-stream config: %s', config_event)
             events.put(config_event)
 
             result = _run_crawl(

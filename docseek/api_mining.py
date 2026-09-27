@@ -21,7 +21,7 @@ from .reach import is_safe_url
 logger = logging.getLogger(__name__)
 
 # Collection names to try when the bundle does not reveal one. Kept short and generic.
-_DEFAULT_COLLECTIONS = ('Files', 'files', 'Documents', 'documents', 'Reports', 'reports')
+_DEFAULT_COLLECTIONS = ('Documents', 'documents', 'Reports', 'reports', 'Funds', 'funds', 'Files', 'files')
 _PDF_NAME_RE = re.compile(r'\.pdf$', re.IGNORECASE)
 
 

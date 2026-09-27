@@ -49,4 +49,4 @@ def test_only_a_listing_is_worth_the_clicks():
     # cost a third of the crawl's pages
     from docseek.jev_crawl import LOAD_MORE_KINDS
     assert 'document_listing' in LOAD_MORE_KINDS and 'seed' in LOAD_MORE_KINDS
-    assert 'subject_page' not in LOAD_MORE_KINDS and 'news_or_article' not in LOAD_MORE_KINDS
+    assert 'fund_or_product' not in LOAD_MORE_KINDS and 'news_or_article' not in LOAD_MORE_KINDS
