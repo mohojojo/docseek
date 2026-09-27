@@ -154,3 +154,29 @@ class TestStore:
         store = store_with_program(tmp_path)
         store.save_snapshot(KEY, {'date': 'd', 'urls': []})
         assert store.delete(KEY) and store.keys() == [] and not list(tmp_path.iterdir())
+
+
+class TestVerifiedAndLog:
+    def test_an_unverified_program_never_answers(self, tmp_path):
+        store = store_with_program(tmp_path, verified=False, last_kept=0)
+        crawl, calls = crawled()
+
+        def must_not_run(code, fetcher):
+            raise AssertionError('an unverified program ran')
+        result = hybrid_discover(START, GOAL, store=store, judge=FakeJudge(), crawl=crawl, runner=must_not_run)
+        assert calls and result.program['reason'] == 'unverified'
+
+    def test_a_failed_generation_still_leaves_its_log(self, tmp_path):
+        class Failed:
+            def __init__(self, *a, **k):
+                pass
+
+            def explore(self):
+                return {'code': '', 'notes': 'not submitted', 'turns': 42,
+                        'log': [{'turn': 1, 'tool': 'fetch_page', 'result': '403 Access Denied'}]}
+        store = ProgramStore(tmp_path)
+        program, report = generate_program(store, START, GOAL, llm=None, judge=FakeJudge(), explorer_cls=Failed)
+        log = store.load_log(KEY)
+        assert program is None and report['turns'] == 42 and 'log' not in report
+        assert log['log'][0]['result'] == '403 Access Denied' and store.last_attempt(KEY) is not None
+        assert store.keys() == []                          # a log alone is not a program

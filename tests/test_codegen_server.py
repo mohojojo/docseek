@@ -116,3 +116,14 @@ def test_generating_starts_in_the_background(client, monkeypatch):
 def test_the_drift_check_endpoint(client, monkeypatch):
     monkeypatch.setattr(server, 'check_drift', lambda store, keys: [{'key': KEY, 'status': 'ok', 'keys': keys}])
     assert client.post('/v1/programs/check', json={}).json() == [{'key': KEY, 'status': 'ok', 'keys': None}]
+
+
+def test_a_recent_attempt_holds_back_automatic_regeneration_but_not_an_explicit_one(client, monkeypatch, tmp_path):
+    ProgramStore(tmp_path).save_log(KEY, {'log': []})
+    monkeypatch.setattr(server, '_run_crawl', crawl_result)
+    monkeypatch.setattr(server, 'codegen_llm', lambda: object())
+    monkeypatch.setattr(server, 'generate_program', lambda *a, **k: (None, {}))
+    body = client.post('/v1/discover', json={'url': URL, 'goal': GOAL, 'programs': True}).json()
+    assert body['program']['generation'] == 'recently_tried'
+    explicit = client.post('/v1/programs', json={'url': URL, 'goal': GOAL}).json()
+    assert explicit['generation'] == 'started'

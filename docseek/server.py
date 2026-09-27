@@ -34,6 +34,9 @@ from .series import apply_latest
 
 PATTERNS_DIR = os.environ.get('PATTERNS_DIR')
 PROGRAMS_DIR = os.environ.get('PROGRAMS_DIR')
+# a discover request regenerates a site's program at most this often: a site that blocks bots would otherwise
+# cost a generation per request
+CODEGEN_RETRY_HOURS = float(os.environ.get('CODEGEN_RETRY_HOURS') or 24)
 
 _WEB_SEARCH_COMPATIBLE_MODELS: frozenset[str] = frozenset({
     'claude-haiku-4-5-20251001',
@@ -259,9 +262,14 @@ _generating: set[str] = set()
 _generating_lock = Lock()
 
 
-def _start_generation(store: ProgramStore, url: str, goal: str, judge: str | None, profile: str) -> str:
-    """Write a program in the background: 'started', 'already_running', or 'no_model' when no coding model is
-    configured."""
+def _start_generation(store: ProgramStore, url: str, goal: str, judge: str | None, profile: str,
+                      force: bool = False) -> str:
+    """Write a program in the background: 'started', 'already_running', 'no_model' when no coding model is
+    configured, or 'recently_tried' when one was generated for this site and goal within CODEGEN_RETRY_HOURS
+    (unless `force`, as an explicit POST /v1/programs is)."""
+    last = store.last_attempt(program_key(url, goal))
+    if not force and last and time.time() - last < CODEGEN_RETRY_HOURS * 3600:
+        return 'recently_tried'
     try:
         llm = codegen_llm()
     except ValueError:
@@ -455,8 +463,8 @@ class DriftRequest(BaseModel):
 
 
 def _program_summary(key: str, meta: dict) -> dict:
-    fields = ('goal', 'start_url', 'generated', 'model', 'submitted', 'stale', 'last_run', 'last_reason', 'last_kept',
-              'failures')
+    fields = ('goal', 'start_url', 'generated', 'model', 'submitted', 'verified', 'stale', 'last_run', 'last_reason',
+              'last_kept', 'failures')
     return {'key': key, **{f: meta.get(f) for f in fields}}
 
 
@@ -477,7 +485,7 @@ def get_program(key: str, x_api_key: str | None = Header(default=None)) -> dict:
         program = None
     if program is None:
         raise HTTPException(status_code=404, detail=f'No program: {key}')
-    return {'key': key, 'code': program.code, 'meta': program.meta}
+    return {'key': key, 'code': program.code, 'meta': program.meta, 'log': store.load_log(key)}
 
 
 @app.delete('/v1/programs/{key}')
@@ -499,7 +507,7 @@ def create_program(payload: GenerateRequest, x_api_key: str | None = Header(defa
     _require_api_key(x_api_key)
     store = _require_programs_dir()
     _program_judge(payload.judge, payload.profile)            # the judge must be able to run before we start
-    generation = _start_generation(store, payload.url, payload.goal, payload.judge, payload.profile)
+    generation = _start_generation(store, payload.url, payload.goal, payload.judge, payload.profile, force=True)
     if generation == 'no_model':
         raise HTTPException(status_code=503, detail='No coding model configured: set CODEGEN_MODEL (or LLM_MODEL)')
     return {'key': program_key(payload.url, payload.goal), 'generation': generation}

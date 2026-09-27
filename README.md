@@ -98,7 +98,9 @@ The relevance judge scores what a document *is*, never which period it covers, s
 latest factsheet" finds the whole archive. Code answers the "latest" part: every document carries a `period`
 facet (`2026-03`, `2026-Q1`, `2026-H1` or `2026`, read from its name and URL in English, German, Hungarian,
 French, Spanish and Italian) and a `series` facet - its file name with the period taken out, or its title when
-the file name says nothing. `latest_in_series` marks the newest of each series.
+the file name says nothing. `latest_in_series` marks the newest of each series. A document its name numbers -
+"Issue 8, 2025", "No. 3", a case code like `SAN-2025-12` - gets its year as the period, and its number orders the
+year's issues, so a URL like `eb202508` is not read as August.
 
 Set `"latest": true` (CLI `--latest`) to keep only those: older documents of a series are counted in
 `superseded_count` instead of returned. Every series keeps its newest document, however old; documents with no
@@ -131,6 +133,12 @@ robots.txt, and the same public-address rule as the crawl. **This is a boundary,
 was written by a model that read untrusted page text, so the feature is off unless `PROGRAMS_DIR` is set, and a
 docseek that strangers can reach belongs in a container.
 
+A program is **verified** when its final code ran and either returned documents or had every fetch succeed; one
+written against a site that refused every request is not, and is never used to answer. Every generation leaves a
+log (`<key>.log.json`, also in `GET /v1/programs/{key}`) of what the agent said and did, including generations that
+produced nothing. After a crawl, a program is regenerated automatically at most once every `CODEGEN_RETRY_HOURS`,
+so a site that blocks bots does not cost a generation per request; `POST /v1/programs` always runs.
+
 Health cannot tell when a program confidently returns the wrong slice of a site; a crawl or a person can.
 
 ## Configuration
@@ -147,6 +155,7 @@ Health cannot tell when a program confidently returns the wrong slice of a site;
 | `CRAWLER_API_KEY` | When set, every request must send it as `X-API-Key`. Unset, the API is open - set it before exposing the service. |
 | `PROGRAMS_DIR` | Directory for generated discovery programs. Unset: the feature is off. |
 | `CODEGEN_MODEL` | Model that writes programs, on the configured provider (default: `LLM_MODEL`). Use a strong coding model. |
+| `CODEGEN_RETRY_HOURS` | Least time between automatic regenerations of one site's program (default 24). |
 | `CODEGEN_MAX_TURNS`, `CODEGEN_MAX_INPUT_TOKENS` | Budget for writing one program (default 45 turns, 3M input tokens including cached reads). |
 | `PATTERNS_DIR` | Directory where learned site knowledge (gate sequences, replayable escalation steps) is kept. Unset: nothing is learned. |
 

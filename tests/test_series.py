@@ -135,3 +135,24 @@ def test_the_api_marks_every_response_and_filters_on_request(monkeypatch):
     assert [d['latest_in_series'] for d in plain['downloads']] == [False, True]
     latest = client.post('/v1/discover', json={'url': 'https://s.example/', 'goal': 'g', 'latest': True}).json()
     assert [d['period'] for d in latest['downloads']] == ['2026-03'] and latest['superseded_count'] == 1
+
+
+class TestNumberedIssues:
+    @pytest.mark.parametrize('name, url, expected', [
+        ('Economic Bulletin Issue 8, 2025', 'https://s.example/pub/eb202508.en.pdf', ('2025', 8)),
+        ('SAN-2025-12', 'https://s.example/files/2025-12/san-2025-12.pdf', ('2025', 12)),
+        ('Monatsbericht Heft 3', 'https://s.example/2026/heft3.pdf', (None, 3)),     # a year in a folder is not read
+        ('Factsheet No. 3 March 2026', 'https://s.example/f.pdf', ('2026-03', 3)),
+        ('Factsheet March 2026', 'https://s.example/f-2026-03.pdf', ('2026-03', None)),
+    ])
+    def test_a_numbered_issue_is_its_year_and_its_number(self, name, url, expected):
+        from docseek.series import document_period
+        assert document_period(name, url) == expected
+
+    def test_the_latest_issue_is_the_highest_number_of_the_newest_year(self):
+        docs = [doc(f'https://s.example/pub/eb2025{n:02d}.en.pdf', name=f'Economic Bulletin Issue {n}, 2025')
+                for n in (1, 2, 8)]
+        docs.append(doc('https://s.example/pub/eb202408.en.pdf', name='Economic Bulletin Issue 8, 2024'))
+        mark_latest(docs)
+        assert [d.latest_in_series for d in docs] == [False, False, True, False]
+        assert {d.period for d in docs} == {'2025', '2024'}

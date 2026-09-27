@@ -1,6 +1,7 @@
 """Periods and series: which document is the newest of its kind, read by code, never by a model.
 
   period_of(text)      '2026-03' | '2026-Q1' | '2026-H1' | '2026' | None, from a document's name and URL
+  document_period(name, url)  (period, sequence number): a numbered issue is its year and its number, not a month
   period_end(period)   a comparable month index: a quarter, half or year counts as its last month
   series_key(url, name) what stays of a document's identity once its period is taken out
   mark_latest(docs)    sets each document's `series` and `latest_in_series` facets; returns the superseded ones
@@ -104,6 +105,29 @@ def period_of(text: str) -> str | None:
     return None
 
 
+# A numbered issue or case: 'Issue 8, 2025' (a URL like eb202508 would read as August), 'SAN-2025-12' (decision 12)
+_ISSUE_MARKER = re.compile(r'(?<![a-zà-ÿ])(?:issue|no|nr|number|numéro|numero|número|heft|ausgabe|szám)\.?\s*(\d{1,4})\b'
+                           r'|n[°º]\s*(\d{1,4})\b', re.IGNORECASE)
+_CODE = re.compile(r'(?<![A-Za-z])[A-Z]{2,6}[-_ ](20\d{2})[-_](\d{1,4})(?![\d/])')
+_YEAR = re.compile(rf'{_NO_YEAR_EDGE_BEFORE}{_Y}{_NO_YEAR_EDGE_AFTER}')
+
+
+def document_period(name: str, url: str) -> tuple[str | None, int | None]:
+    """(period, sequence) of a document. When its name numbers it - an issue, a case code - the number is a
+    sequence within the year, never a month: the period is the year, and the sequence orders the year's documents."""
+    name = unquote(name or '')
+    code = _CODE.search(name)
+    if code:
+        return code[1], int(code[2])
+    issue = _ISSUE_MARKER.search(name)
+    if issue:
+        rest = name[:issue.start()] + ' ' + name[issue.end():]
+        year = _YEAR.search(rest) or _YEAR.search(unquote(urlparse(url).path))
+        period = period_of(rest) or (year[1] if year else None)
+        return period, int(issue[1] or issue[2])
+    return period_of(f'{name} {url}'), None
+
+
 def period_end(period: str) -> int:
     """Months since year 0 at the period's end: 2026-Q1 and 2026-03 compare equal, 2026 is its December."""
     year, _, part = period.partition('-')
@@ -156,18 +180,22 @@ def mark_latest(documents: list) -> list:
     latest_in_series is True for the newest of a series (ties included), False for an older one, None when the
     document has no period (nothing to compare it by - a file a site overwrites each month often has none) or
     was rejected. Only accepted, unsure or unscored documents can supersede another."""
-    newest: dict[str, int] = {}
+    newest: dict[str, tuple[int, int]] = {}
+    order: dict[int, tuple[int, int]] = {}
     for doc in documents:
-        doc.period = doc.period or period_of(f'{doc.name} {doc.url}')
+        period, sequence = document_period(doc.name, doc.url)
+        doc.period = doc.period or period
         doc.series = series_key(doc.url, doc.name)
-        if doc.period and doc.verdict != 'rejected':
-            newest[doc.series] = max(newest.get(doc.series, 0), period_end(doc.period))
+        if doc.period:
+            order[id(doc)] = (period_end(doc.period), sequence or 0)
+            if doc.verdict != 'rejected':
+                newest[doc.series] = max(newest.get(doc.series, (0, 0)), order[id(doc)])
     superseded = []
     for doc in documents:
         if not doc.period or doc.verdict == 'rejected':
             doc.latest_in_series = None
             continue
-        doc.latest_in_series = period_end(doc.period) >= newest[doc.series]
+        doc.latest_in_series = order[id(doc)] >= newest[doc.series]
         if not doc.latest_in_series:
             superseded.append(doc)
     return superseded

@@ -4,11 +4,12 @@ A ProgramStore keeps one program per (start host, goal) in a directory (PROGRAMS
   <key>.py             the program
   <key>.json           its metadata: goal, start_url, notes, data_hosts, post_endpoints, model, usage, health
   <key>.snapshot.json  what it returned when snapshotted, for the drift check
+  <key>.log.json       the last generation's log (written even when it produced no program)
 
 Hybrid discovery - the program first, the crawl as the safety net:
-  program exists and not stale -> run it (no model) -> judge -> healthy? answer with it
-                                                              -> not healthy: mark it stale, crawl
-  no program                   -> crawl
+  program exists, verified and not stale -> run it (no model) -> judge -> healthy? answer with it
+                                                                       -> not healthy: mark it stale, crawl
+  no program, or an unverified one       -> crawl
 After a crawl the caller may generate a (new) program for next time (generate_program).
 
 A program is unhealthy when it errors, returns nothing where it used to find something, or keeps (accepted +
@@ -26,10 +27,11 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from ..jev_crawl import period_of, year_of
+from ..jev_crawl import year_of
 from ..judge import RelevanceJudge, verdict_for
 from ..models import AgenticCrawlResult, AgenticDownload
 from ..reach import bare_host
+from ..series import document_period
 from .fetcher import Fetcher
 from .sandbox import run_program
 
@@ -84,8 +86,21 @@ class ProgramStore:
         return sorted(p.stem for p in self.root.glob('*.py') if _KEY_RE.match(p.stem)
                       and p.with_suffix('.json').exists()) if self.root.exists() else []
 
+    def save_log(self, key: str, log: dict) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        self._path(key, '.log.json').write_text(json.dumps(log, indent=1, ensure_ascii=False, default=str))
+
+    def load_log(self, key: str) -> dict | None:
+        path = self._path(key, '.log.json')
+        return json.loads(path.read_text()) if path.exists() else None
+
+    def last_attempt(self, key: str) -> float | None:
+        """When a program was last generated for this key (successfully or not), as a POSIX time."""
+        path = self._path(key, '.log.json')
+        return path.stat().st_mtime if path.exists() else None
+
     def delete(self, key: str) -> bool:
-        paths = [self._path(key, s) for s in ('.py', '.json', '.snapshot.json')]
+        paths = [self._path(key, s) for s in ('.py', '.json', '.snapshot.json', '.log.json')]
         found = any(p.exists() for p in paths)
         for p in paths:
             p.unlink(missing_ok=True)
@@ -116,7 +131,7 @@ def judge_documents(goal: str, start_url: str, documents: list[dict], judge: Rel
     scores = judge.relevance(goal, f'documents found on {start_url}', candidates) if candidates else []
     return [AgenticDownload(
         url=d['url'], name=d['name'] or d['url'].rsplit('/', 1)[-1], reason='generated program', source_page=start_url,
-        relevance=s, verdict=verdict_for(s), source='program', period=period_of(f"{d['name']} {d['url']}"),
+        relevance=s, verdict=verdict_for(s), source='program', period=document_period(d['name'], d['url'])[0],
         year=year_of(f"{d.get('context', '')} {d['name']} {d['url']}")) for d, s in zip(documents, scores)]
 
 
@@ -139,7 +154,8 @@ def hybrid_discover(start_url: str, goal: str, *, store: ProgramStore, judge: Re
     {key, path: 'program'|'crawl', reason: 'healthy'|'no_program'|'stale'|'error'|'empty'|'dropped'}."""
     key = program_key(start_url, goal)
     program = store.load(key)
-    reason = 'no_program' if program is None else ('stale' if program.meta.get('stale') else None)
+    reason = ('no_program' if program is None else 'stale' if program.meta.get('stale')
+              else 'unverified' if program.meta.get('verified') is False else None)
     if reason is None:
         began = time.monotonic()
         run, downloads = run_saved(program, judge, runner)
@@ -173,12 +189,15 @@ def generate_program(store: ProgramStore, start_url: str, goal: str, *, llm, jud
     strong coding model; callers run it in the background."""
     from .explorer import Explorer
     result = (explorer_cls or Explorer)(start_url, goal, llm=llm, judge=judge).explore()
-    report = {k: v for k, v in result.items() if k != 'code'}
+    report = {k: v for k, v in result.items() if k not in ('code', 'log')}
+    key = program_key(start_url, goal)
+    store.save_log(key, {'goal': goal, 'start_url': start_url, 'attempted': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                         **report, 'log': result.get('log', [])})
     if not result.get('code'):
         return None, report
     meta = {'goal': goal, 'start_url': start_url, **report, 'generated': time.strftime('%Y-%m-%dT%H:%M:%S'),
             'stale': False, 'last_kept': result.get('generated_kept')}
-    program = Program(program_key(start_url, goal), result['code'], meta)
+    program = Program(key, result['code'], meta)
     store.save(program)
     return program, report
 

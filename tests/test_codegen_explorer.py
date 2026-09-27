@@ -142,3 +142,21 @@ def test_submitted_code_that_never_ran_is_run_once_for_its_baseline():
     ex = explorer(llm)
     result = ex.explore()
     assert result['generated_kept'] == 1 and len(ex.runs) == 1
+
+
+def test_a_program_that_only_met_refusals_is_not_verified():
+    def blocked_runner(code, fetcher):
+        return {'documents': [], 'error': None, 'fetch_failures': 3, 'requests': 3, 'renders': 0, 'seconds': 0.1}
+    llm = ScriptedLLM([('submit_program', {'code': WEAK, 'notes': 'the site answered 403 to everything'})])
+    ex = Explorer('https://site.example/', 'goal', llm=llm, judge=FakeJudge(), fetcher=FakeFetcher(), runner=blocked_runner)
+    result = ex.explore()
+    assert result['submitted'] and result['verified'] is False and result['generated_kept'] == 0
+
+
+def test_a_program_that_found_documents_is_verified_and_the_log_shows_the_way():
+    llm = ScriptedLLM([('fetch_page', {'url': 'https://site.example/', 'view': 'links'}),
+                       ('submit_program', {'code': GOOD, 'notes': ''})])
+    result = explorer(llm).explore()
+    assert result['verified'] is True
+    assert [e['tool'] for e in result['log'] if 'tool' in e] == ['fetch_page', 'submit_program']
+    assert result['log'][0]['result'].startswith('200 text/html')

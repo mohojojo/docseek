@@ -165,8 +165,14 @@ def _move_cache_breakpoint(messages: list[dict]) -> None:
 
 
 class Explorer:
-    """explore() -> {code, notes, submitted, turns, data_hosts, post_endpoints, model, usage, seconds, runs,
-    generated_kept}. `generated_kept` is what the final program kept (accepted + unsure) on its last run."""
+    """explore() -> {code, notes, submitted, verified, turns, stopped, data_hosts, post_endpoints, model, usage,
+    seconds, runs, generated_kept, log}.
+
+    generated_kept: what the final program kept (accepted + unsure) on its run - the health baseline.
+    verified: the final program ran without error and either returned documents or had every fetch succeed. A
+    program written against a site that refused every request is not verified, whatever its notes claim.
+    log: per turn, what the model said and each tool call with the start of its result - for finding out why a
+    generation went nowhere."""
 
     def __init__(self, start_url: str, goal: str, *, llm: LLMClient, judge: RelevanceJudge,
                  fetcher: Fetcher | None = None, max_turns: int = MAX_TURNS, max_input_tokens: int = MAX_INPUT_TOKENS,
@@ -178,8 +184,9 @@ class Explorer:
         self.runner = runner
         self.usage = {'input': 0, 'output': 0, 'cache_read': 0, 'cache_write': 0}
         self.runs: list[dict] = []
-        self.best: tuple[int, str, int] = (-1, '', 0)      # (accepted, code, kept) of the best run_program draft
-        self._kept_by_code: dict[str, int] = {}
+        self.best: tuple[int, str] = (-1, '')                # (accepted, code) of the best run_program draft
+        self._run_by_code: dict[str, dict] = {}
+        self.log: list[dict] = []
 
     def _chat(self, messages: list[dict]):
         """One model turn. The model may call several tools at once, as an engineer reads several pages at once;
@@ -211,10 +218,11 @@ class Explorer:
         judged = self.judge(result['documents']) if result['documents'] else []
         counts = {v: sum(1 for d in judged if d['verdict'] == v) for v in ('accepted', 'unsure', 'rejected', 'unscored')}
         self.runs.append({'documents': len(judged), 'error': bool(result['error']), **counts})
-        if not result['error']:
-            self._kept_by_code[code] = len(judged) - counts['rejected']
-            if counts['accepted'] > self.best[0]:
-                self.best = (counts['accepted'], code, len(judged) - counts['rejected'])
+        self._run_by_code[code] = {'documents': len(judged), 'error': bool(result['error']),
+                                   'fetch_failures': result.get('fetch_failures', 0),
+                                   'kept': len(judged) - counts['rejected']}
+        if not result['error'] and counts['accepted'] > self.best[0]:
+            self.best = (counts['accepted'], code)
         lines = [f"returned {len(judged)} documents in {result['seconds']} s "
                  f"({result['requests']} fetches, {result['renders']} renders); verdicts {counts}"]
         if result['error']:
@@ -313,6 +321,9 @@ class Explorer:
                 self.usage['cache_read'] += reply.cache_read_tokens
                 self.usage['cache_write'] += reply.cache_write_tokens
                 messages.append({'role': 'assistant', 'content': reply.content})
+                said = ' '.join(b.get('text', '') for b in reply.content if b.get('type') == 'text').strip()
+                if said:
+                    self.log.append({'turn': turn, 'said': said[:600]})
                 calls = [b for b in reply.content if b.get('type') == 'tool_use']
                 if not calls:
                     messages.append({'role': 'user', 'content': 'Continue with the tools; finish with submit_program.'})
@@ -326,24 +337,30 @@ class Explorer:
                         out = 'submitted'
                     else:
                         out = self._tool(call['name'], args)
+                    self.log.append({'turn': turn, 'tool': call['name'],
+                                     'args': {k: (v if k != 'code' else f'{len(v)} chars') for k, v in args.items()},
+                                     'result': out[:400]})
                     results.append({'type': 'tool_result', 'tool_use_id': call['id'], 'content': out})
                 if turn == self.max_turns - 3 and not submitted:
                     results.append({'type': 'text', 'text': 'Three turns left: run your best program and submit it.'})
                 messages.append({'role': 'user', 'content': results})
                 if submitted:
                     break
-            if submitted and submitted['code'] not in self._kept_by_code:
+            if submitted and submitted['code'] not in self._run_by_code:
                 self.run_report(submitted['code'])          # the health baseline: what the final code keeps
         finally:
             self.fetcher.close()
         if submitted:
             code, notes = submitted['code'], submitted['notes']
-            kept = self._kept_by_code.get(code)
         elif self.best[1]:
-            code, notes, kept = self.best[1], f'not submitted; best draft ({self.best[0]} accepted)', self.best[2]
+            code, notes = self.best[1], f'not submitted; best draft ({self.best[0]} accepted)'
         else:
-            code, notes, kept = '', 'not submitted', None
-        return {'code': code, 'notes': notes, 'submitted': bool(submitted), 'turns': turns, 'stopped': stopped,
+            code, notes = '', 'not submitted'
+        run = self._run_by_code.get(code) or {}
+        verified = bool(run) and not run['error'] and (run['documents'] > 0 or run['fetch_failures'] == 0)
+        kept = run.get('kept') if run and not run['error'] else None
+        return {'code': code, 'notes': notes, 'submitted': bool(submitted), 'verified': verified, 'turns': turns,
+                'stopped': stopped, 'log': self.log,
                 'data_hosts': sorted(self.fetcher.data_hosts), 'post_endpoints': sorted(self.fetcher.post_endpoints),
                 'model': self.llm.model, 'usage': dict(self.usage), 'seconds': round(time.monotonic() - started, 1),
                 'runs': self.runs, 'generated_kept': kept}

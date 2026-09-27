@@ -41,7 +41,7 @@ from .llm import LLMClient
 from .models import AgenticCrawlResult, AgenticDownload
 from .reach import OffDomainPolicy, bare_host, is_crawlable  # noqa: F401 - re-exported
 from .recipes import RecipeStore, recipe_from_steps, replay as replay_recipe
-from .series import period_of  # noqa: F401 - re-exported: the period Facet is read by docseek.series
+from .series import document_period, period_of  # noqa: F401 - re-exported: the period Facet is read by docseek.series
 from .scraper import (
     _DEFAULT_USER_AGENT, _TRACKING_SCRIPT_HOSTS, _try_accept_cookies, _try_dismiss_form_disclaimer,
     detect_canvas_page, select_option_anywhere,
@@ -564,7 +564,7 @@ def jev_crawl(
                 url=c['url'], name=c.get('name') or c['url'].rsplit('/', 1)[-1],
                 reason=c.get('reason', f'{source} candidate, verdict {verdict}'), source_page=page_url,
                 relevance=score, verdict=verdict, source=source,
-                period=period_of(f"{c.get('name', '')} {c['url']}"),
+                period=document_period(c.get('name', ''), c['url'])[0],
                 year=year_of(f"{c.get('dated', '')} {c.get('name', '')} {c.get('context', '')} {c['url']}"),
             )
             with lock:
