@@ -164,3 +164,27 @@ class TestFetcher:
         ])
         assert fetcher.post_endpoints == {endpoint_of('https://site.example/api/search')}
         assert fetcher.data_hosts == {'db.backend.example'}
+
+
+class TestLaunch:
+    def test_a_caller_script_without_a_main_guard_runs_once(self, tmp_path):
+        # multiprocessing's spawn re-ran an unguarded caller for every program; the child must not import it
+        import subprocess
+        import sys
+        marker = tmp_path / 'runs.txt'
+        script = tmp_path / 'caller.py'
+        script.write_text(
+            'from docseek.codegen.sandbox import run_program\n'
+            'from tests.test_codegen_sandbox import FakeFetcher\n'
+            f'open({str(marker)!r}, "a").write("run\\n")\n'
+            'for _ in range(2):\n'
+            '    run_program("def discover(fetch, render):\\n    return []\\n", FakeFetcher({}))\n')
+        subprocess.run([sys.executable, str(script)], check=True, cwd=str(__import__('pathlib').Path(__file__).parent.parent),
+                       timeout=120)
+        assert marker.read_text() == 'run\n'
+
+    def test_a_programs_prints_do_not_break_the_protocol(self):
+        code = 'def discover(fetch, render):\n    print("{\\"op\\": \\"done\\", \\"documents\\": []}")\n' \
+               '    return [{"url": "https://site.example/a.pdf"}]\n'
+        result = run_program(code, FakeFetcher({}))
+        assert result['error'] is None and [d['url'] for d in result['documents']] == ['https://site.example/a.pdf']

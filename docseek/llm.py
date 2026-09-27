@@ -39,6 +39,14 @@ DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
 MAX_TOKENS = 4096
 
 
+_BILLING_WORDS = ('credit balance', 'billing', 'insufficient_quota', 'quota exceeded', 'exceeded your current quota')
+
+
+def _is_billing_error(text: str) -> bool:
+    """Out of credit or quota: permanent until someone pays, so retrying only wastes time."""
+    return any(word in (text or '').lower() for word in _BILLING_WORDS)
+
+
 class LLMUnavailable(Exception):
     """The provider refused the request for good (no key, bad key, no credit): retrying cannot help."""
 
@@ -117,6 +125,10 @@ class AnthropicLLM:
             response = self._client.messages.create(model=self.model, **kwargs)
         except (self._anthropic.AuthenticationError, self._anthropic.PermissionDeniedError) as exc:
             raise LLMUnavailable(f'anthropic: {exc}') from exc
+        except self._anthropic.APIStatusError as exc:
+            if _is_billing_error(str(exc)):
+                raise LLMUnavailable(f'anthropic: {exc}') from exc
+            raise
         self.usage.add(response.usage.input_tokens, response.usage.output_tokens)
         return response
 
@@ -185,7 +197,7 @@ class OpenAICompatibleLLM:
                 if unsupported == 'response_format':
                     self._json_mode = False
             body = self._adapt(body)
-        if resp.status_code in (401, 402, 403, 404):
+        if resp.status_code in (401, 402, 403, 404) or (resp.status_code == 429 and _is_billing_error(resp.text)):
             raise LLMUnavailable(f'{self.provider} {resp.status_code}: {resp.text[:200]}')
         resp.raise_for_status()
         data = resp.json()

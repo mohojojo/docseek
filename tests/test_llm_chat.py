@@ -134,3 +134,30 @@ def test_a_reasoning_model_gets_max_completion_tokens_and_no_temperature():
     bodies.clear()
     llm.complete_json('s', 'u')
     assert len(bodies) == 1                                                 # remembered: no 400s the second time
+
+
+def test_an_empty_credit_balance_is_permanent_not_retried():
+    import anthropic
+    import pytest
+
+    from docseek.llm import AnthropicLLM, LLMUnavailable
+
+    class Client:
+        class messages:
+            @staticmethod
+            def create(**kwargs):
+                response = httpx.Response(400, request=httpx.Request('POST', 'https://api.anthropic.com/v1/messages'))
+                raise anthropic.BadRequestError('Your credit balance is too low to access the Anthropic API.',
+                                                response=response, body=None)
+    with pytest.raises(LLMUnavailable):
+        AnthropicLLM('claude-test', client=Client()).chat('s', [{'role': 'user', 'content': 'go'}], TOOLS)
+
+
+def test_an_exhausted_openai_quota_is_permanent():
+    import pytest
+
+    from docseek.llm import LLMUnavailable
+    llm = _llm(lambda r: httpx.Response(429, json={'error': {'code': 'insufficient_quota',
+                                                             'message': 'You exceeded your current quota'}}))
+    with pytest.raises(LLMUnavailable):
+        llm.complete_json('s', 'u')

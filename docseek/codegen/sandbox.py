@@ -1,10 +1,11 @@
 """Run a generated discovery program in a child process that reaches the web only through the parent's Fetcher.
 
-The program was written by a model that read untrusted page text, so the child:
-- starts with an empty environment (no API keys) and OS limits on CPU time and memory,
+The program was written by a model that read untrusted page text, so the child (docseek/codegen/_child.py):
+- is a fresh interpreter started with an empty environment (no API keys), with OS limits on CPU time and memory,
+- is a standalone script: it does not import docseek, and nothing re-runs the caller's main module,
 - may import only an allowlist of modules (imported before the audit hook is installed),
 - has an audit hook that refuses sockets, subprocesses, file opens and ctypes,
-- asks the parent for every page over a pipe; the parent applies the Fetcher's site, robots.txt and address rules.
+- asks the parent for every page; the parent applies the Fetcher's site, robots.txt and address rules.
 
 This is a boundary, not a hardened jail: a determined escape from CPython is possible. It keeps honest mistakes
 and casual injected instructions from touching anything but the target site. Generated programs are therefore off
@@ -12,150 +13,86 @@ unless PROGRAMS_DIR is set; run docseek in a container if strangers can reach it
 """
 from __future__ import annotations
 
-import multiprocessing as mp
+import json
+import os
+import queue
+import subprocess
+import sys
+import threading
 import time
-import traceback
+from pathlib import Path
 
 ALLOWED_MODULES = ('re', 'json', 'html', 'urllib.parse', 'collections', 'itertools', 'datetime', 'math',
                    'string', 'functools', 'unicodedata', 'html.parser')
 PROGRAM_TIMEOUT_S = 300
 MAX_DOCUMENTS = 5000
-MEMORY_LIMIT_BYTES = 2 * 1024 ** 3
-_BLOCKED_EVENTS = ('socket.', 'subprocess.', 'os.system', 'os.exec', 'os.spawn', 'os.posix_spawn', 'os.fork',
-                   'open', 'ctypes.', 'os.remove', 'os.rename', 'os.putenv', 'shutil.')
-_BLOCKED_BUILTINS = ('open', 'exec', 'eval', 'compile', 'input', 'breakpoint', 'exit', 'quit', 'help')
+_CHILD = Path(__file__).resolve().parent / '_child.py'
 
 
 class FetchRefused(Exception):
     """The guard said no; the message says why, so a program or the agent can adapt."""
 
 
-def _limit_resources(cpu_seconds: int) -> None:
-    try:
-        import resource
-    except ImportError:                                   # not a POSIX system: the wall-clock timeout still applies
-        return
-    for limit, value in ((resource.RLIMIT_CPU, cpu_seconds), (getattr(resource, 'RLIMIT_AS', None), MEMORY_LIMIT_BYTES)):
-        if limit is None:
-            continue
-        try:
-            resource.setrlimit(limit, (value, value))
-        except (ValueError, OSError):                     # macOS refuses RLIMIT_AS; keep what the platform allows
-            pass
-
-
-def _child(code: str, conn, cpu_seconds: int) -> None:
-    import builtins
-    import importlib
-    import os
-    import sys
-
-    modules = {name: importlib.import_module(name) for name in ALLOWED_MODULES}
-    modules['urllib'] = importlib.import_module('urllib')
-    real_import = builtins.__import__
-
-    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name in modules or any(name == m.split('.')[0] for m in ALLOWED_MODULES):
-            return real_import(name, globals, locals, fromlist, level)
-        raise ImportError(f'module {name!r} is not available to a discovery program')
-
-    def audit(event, args):
-        if event.startswith(_BLOCKED_EVENTS):
-            raise RuntimeError(f'{event} is not allowed in a discovery program')
-
-    def ask(kind: str, payload):
-        conn.send((kind, payload))
-        ok, value = conn.recv()
-        if not ok:
-            raise FetchRefused(value)
-        return value
-
-    safe_builtins = {k: getattr(builtins, k) for k in dir(builtins) if k not in _BLOCKED_BUILTINS}
-    safe_builtins['__import__'] = guarded_import
-    env = {'__builtins__': safe_builtins, '__name__': 'discovery_program', 'FetchRefused': FetchRefused}
-    try:
-        compiled = compile(code, 'discovery_program.py', 'exec')
-        os.environ.clear()                                # the package loaded .env on import: no keys past here
-        _limit_resources(cpu_seconds)
-        sys.addaudithook(audit)
-        exec(compiled, env)
-        discover = env['discover']
-        args = [lambda url: ask('fetch', url), lambda url: ask('render', url)]
-        if discover.__code__.co_argcount >= 3:
-            args.append(lambda url, body: ask('post', (url, body)))
-        found = discover(*args)
-        docs = [{'url': str(d['url']), 'name': str(d.get('name', ''))[:300], 'context': str(d.get('context', ''))[:400]}
-                for d in list(found)[:MAX_DOCUMENTS] if isinstance(d, dict) and d.get('url')]
-        conn.send(('done', docs))
-    except BaseException as exc:  # noqa: BLE001 - the program's own failure is the result
-        conn.send(('error', describe_error(exc, code)))
-
-
-def describe_error(exc: BaseException, code: str) -> str:
-    """The traceback without reading source files (the audit hook refuses open): the program's own lines are
-    quoted from its code, library frames by name."""
-    lines = code.splitlines()
-    frames = []
-    for frame, lineno in traceback.walk_tb(exc.__traceback__):
-        name = frame.f_code.co_filename
-        where = f'{name}:{lineno} in {frame.f_code.co_name}'
-        if name == 'discovery_program.py' and 0 < lineno <= len(lines):
-            where += f'\n    {lines[lineno - 1].strip()}'
-        frames.append(where)
-    return '\n'.join(frames[-6:] + [f'{type(exc).__name__}: {exc}'])[-3000:]
+def _child_env() -> dict:
+    """What a fresh interpreter needs and nothing more: no keys, no proxies, no paths into the user's home."""
+    return {k: os.environ[k] for k in ('SYSTEMROOT',) if k in os.environ}     # Windows cannot start Python without it
 
 
 def run_program(code: str, fetcher, timeout_s: float = PROGRAM_TIMEOUT_S) -> dict:
     """{documents, error, fetch_failures, requests, renders, seconds}. Never raises for the program's own faults.
     `fetcher` is a docseek.codegen.fetcher.Fetcher (or anything with its fetch/render/post)."""
-    ctx = mp.get_context('spawn')
-    parent, child = ctx.Pipe()
-    proc = ctx.Process(target=_child, args=(code, child, int(timeout_s) + 10), daemon=True)
     started = time.monotonic()
     requests0, renders0 = fetcher.requests, fetcher.renders
-    proc.start()
     result = {'documents': [], 'error': None, 'fetch_failures': 0}
+    proc = subprocess.Popen([sys.executable, '-I', str(_CHILD)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, env=_child_env(), text=True, encoding='utf-8', bufsize=1)
+    lines: queue.Queue = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(line) for line in proc.stdout] + [lines.put(None)], daemon=True).start()
     try:
+        proc.stdin.write(json.dumps({'code': code, 'cpu_seconds': int(timeout_s) + 10, 'allowed': ALLOWED_MODULES,
+                                     'max_documents': MAX_DOCUMENTS}) + '\n')
+        proc.stdin.flush()
         while True:
-            if time.monotonic() - started > timeout_s:
+            left = timeout_s - (time.monotonic() - started)
+            if left <= 0:
                 result['error'] = f'timed out after {timeout_s:.0f} s'
                 break
-            if not parent.poll(1.0):
-                if not proc.is_alive():
-                    result['error'] = f'the program process exited ({proc.exitcode}) without a result'
-                    break
+            try:
+                line = lines.get(timeout=min(left, 1.0))
+            except queue.Empty:
                 continue
-            msg = parent.recv()
-            if msg[0] == 'done':
-                result['documents'] = msg[1]
+            if line is None:
+                proc.wait(5)
+                result['error'] = f'the program process exited ({proc.returncode}) without a result'
                 break
-            if msg[0] == 'error':
-                result['error'] = msg[1]
+            message = json.loads(line)
+            if message['op'] == 'done':
+                result['documents'] = message['documents']
                 break
-            parent.send(_serve(fetcher, *msg, result))
-    except EOFError:
-        result['error'] = 'the program process died'
+            if message['op'] == 'error':
+                result['error'] = message['message']
+                break
+            ok, value = _serve(fetcher, message, result)
+            proc.stdin.write(json.dumps({'ok': ok, 'value': value}) + '\n')
+            proc.stdin.flush()
+    except (BrokenPipeError, json.JSONDecodeError) as exc:
+        result['error'] = f'the program process died ({type(exc).__name__})'
     finally:
-        if proc.is_alive():
+        if proc.poll() is None:
             proc.kill()
-        proc.join(5)
+        proc.wait(5)
     result.update(requests=fetcher.requests - requests0, renders=fetcher.renders - renders0,
                   seconds=round(time.monotonic() - started, 1))
     return result
 
 
-def _serve(fetcher, kind: str, payload, result: dict) -> tuple[bool, str]:
+def _serve(fetcher, message: dict, result: dict) -> tuple[bool, str]:
     """One page for the child: (True, body) or (False, why). A failure is counted - programs may swallow it."""
+    url = message.get('url', '')
     try:
-        if kind == 'post':
-            url, body = payload
-            page = fetcher.post(url, body)
-        elif kind == 'render':
-            url = payload
+        if message['op'] == 'render':
             return True, fetcher.render(url)['html']
-        else:
-            url = payload
-            page = fetcher.fetch(url)
+        page = fetcher.post(url, message.get('body') or {}) if message['op'] == 'post' else fetcher.fetch(url)
         if page['status'] >= 400:
             result['fetch_failures'] += 1
             return False, f'HTTP {page["status"]} for {url}'
