@@ -1,0 +1,20 @@
+services:
+  docseek:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8010:8010"
+    environment:
+      # one LLM is required: LLM_PROVIDER (+ LLM_MODEL / LLM_API_KEY / LLM_BASE_URL), or just ANTHROPIC_API_KEY
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      # set it to require an X-API-Key header on every request; unset, the API is open
+      CRAWLER_API_KEY: ${CRAWLER_API_KEY:-}
+      PATTERNS_DIR: /app/data/patterns
+    volumes:
+      - ./data/patterns:/app/data/patterns

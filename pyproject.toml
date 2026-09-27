@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "docseek"
+version = "0.1.0"
+description = "Goal-driven document discovery: give it a website and a goal, get back the documents the goal asks for, each with a relevance verdict."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "mohojojo", email = "mohojojoo@gmail.com" }]
+requires-python = ">=3.11"
+keywords = ["crawler", "document discovery", "web scraping", "llm", "playwright"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+]
+dependencies = [
+    "anthropic>=0.90.0",
+    "fastapi>=0.115.0",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "playwright>=1.40",
+    "python-dotenv>=1.0",
+    "uvicorn>=0.30.0",
+]
+
+[project.scripts]
+docseek = "docseek.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["docseek"]

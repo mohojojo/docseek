@@ -1,0 +1,19 @@
+{
+  "site": "reports.example",
+  "goal": "Find the 2025 annual reports (PDF)",
+  "start_url": "https://reports.example/",
+  "profile": "generic",
+  "goal_year": "2025",
+  "shape": "flat document list",
+  "notes": "FORMAT EXAMPLE ONLY, not runnable: reports.example is a fictional site. Copy this file to <your-site>.json and fill it with documents captured from the real site. The loaders skip example.json unless its site is named with --sites.",
+  "expected_documents": [
+    {
+      "url": "https://reports.example/files/annual-report-2025.pdf",
+      "name": "Annual report 2025"
+    },
+    {
+      "url": "https://reports.example/files/annual-report-2025-summary.pdf",
+      "name": "Annual report 2025 (summary)"
+    }
+  ]
+}

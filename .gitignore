@@ -1,0 +1,19 @@
+# secrets
+.env
+.env.*
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# crawl output and local state
+data/
+eval/reports/
+eval/snapshots/
+eval/ground_truth/*.json
+!eval/ground_truth/example.json
