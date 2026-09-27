@@ -108,7 +108,8 @@ def run_one(jev_crawl, entry: dict, api_key: str, args, snapshot_dir: Path | Non
         recipes_dir=args.recipes, judge=make_judge(args.judge, args.profile or entry.get('profile')),
         on_event=on_event, on_trace=on_trace if snapshot_dir else None,
     )
-    apply_latest(result, entry.get('latest', False), include_rejected=True)
+    apply_latest(result, entry.get('latest', False), include_rejected=True,
+                 judge=lambda: make_judge(args.judge, args.profile or entry.get('profile')))
     kept = [d for d in result.downloads if d.latest_in_series is not False] if entry.get('latest') else result.downloads
     run = score_run(kept, page_numbers, entry['expected'], entry.get('keep_query', False),
                     entry.get('identity_re'), entry.get('goal_year'))

@@ -108,6 +108,12 @@ they are ordered by the numbers in it (years first) without deciding whether `08
 doubt, nothing is dropped:** a series that mixes formats, or a document with nothing to order by, is kept whole. A
 wrong keep costs a caller one extra document; a wrong drop would lose one.
 
+What code cannot settle goes to the relevance judge, and only with `latest`. Documents that look alike once their
+numbers are taken out (`ETALON-2211` beside `ETALON-2212`, `2026-Q1` beside `2026-03`, but also `cm4` beside `cm5`)
+form a doubtful group, and the judge is asked, for each, whether a newer edition of the same document is in the list.
+It is dropped only when the judge is sure (probability 0.8 or more with Jev's calibrated answers); anything less is
+kept. Grouping by look is only a question: the judge tells two products apart as readily as two editions.
+
 The `period` facet (`2026-03`, `2026-Q1`, `2026-H1` or `2026`, read in English, German, Hungarian, French, Spanish
 and Italian) is a best-effort label for people and callers, not what the filter decides by.
 

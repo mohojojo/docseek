@@ -27,8 +27,8 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from .judge import (  # noqa: F401 - re-exported: the shared Verdict bands and link state live in docseek.judge
-    ACCEPTED_AT, C_HIDDEN, HIDDEN_DOCS_AT, MAX_FILTER_OPTIONS, Q_HIDDEN, REJECTED_BELOW, is_weakly_named, link_state,
-    verdict_for,
+    ACCEPTED_AT, C_HIDDEN, C_OLDER, HIDDEN_DOCS_AT, MAX_FILTER_OPTIONS, Q_HIDDEN, Q_OLDER, REJECTED_BELOW,
+    document_states, is_weakly_named, link_state, verdict_for,
 )
 from .profile import Profile, load_profile
 
@@ -232,6 +232,18 @@ class JevClient:
             if answer['choice'] != 'keep':
                 picks[f['id']] = (f['options'][int(answer['choice'][1:])], answer['probabilities'][answer['choice']])
         return picks
+
+    def older_editions(self, goal: str, documents: list[dict]) -> list[float | None]:
+        """For each document, the probability that a newer edition of it is also in the list. Every question sees
+        the whole list: an edition is older only next to its successor."""
+        states = document_states(documents)
+
+        def build(indices):
+            questions = {f'q{i + 1}': {'type': 'noul', 'instructions': Q_OLDER.format(did=f'D{i + 1}'), 'criteria': C_OLDER}
+                         for i in indices}
+            return ({'goal': goal, 'documents': states}, questions,
+                    lambda answers: [answers[f'q{i + 1}']['noul'] if answers else None for i in indices])
+        return self._batched(list(range(len(documents))), build)
 
     def hides_documents(self, goal: str, page_state: dict) -> float | None:
         answers = self.ask({'goal': goal, **page_state},

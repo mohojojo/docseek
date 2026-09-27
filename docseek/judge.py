@@ -4,6 +4,8 @@
     page_kinds(goal, links)                        -> (page kind, probability) per link: ranks the Frontier
     hides_documents(goal, page_state)              -> probability the page hides documents: triggers an Escalation
     filter_values(goal, page_state, filters)       -> the value to set per filter, before any Escalation
+    older_editions(goal, documents)                -> probability per document that a newer edition of it is listed
+                                                      (docseek.series asks, for groups code could not order)
 
 Adapters: JevClient (docseek.jev, TypeSafe Jev: calibrated probabilities) and LLMJudge (any model through
 docseek.llm). Each adapter maps its answers into the shared Verdict bands below. A judge reports `open` when it
@@ -29,6 +31,15 @@ ACCEPTED_AT = 0.75
 REJECTED_BELOW = 0.4
 HIDDEN_DOCS_AT = 0.8
 MAX_FILTER_OPTIONS = 60
+
+SUPERSEDED_AT = 0.8     # a document is dropped as an older edition only this surely (docseek.series)
+Q_OLDER = ('Is document {did} an older edition of another document in this list: the same document (the same '
+           'subject, type and language) for an earlier period, replaced by a newer edition that is also listed?')
+C_OLDER = {
+    'true': 'A newer edition of the same document is in the list, so this one is superseded.',
+    'false': 'This is the newest listed edition of its document, or no listed document is a later edition of it: '
+             'the others are about another product, fund or subject, in another language, or of another type.',
+}
 
 Q_HIDDEN = ('Does this page still hide documents the goal asks for behind a control that has not been used '
             '(a tab, a dropdown, a filter, a search or other form, a "load more" button, or an investor or '
@@ -59,6 +70,12 @@ class RelevanceJudge(Protocol):
     def hides_documents(self, goal: str, page_state: dict) -> float | None: ...
 
     def filter_values(self, goal: str, page_state: dict, filters: list[dict]) -> dict[str, tuple[str, float]]: ...
+
+    def older_editions(self, goal: str, documents: list[dict]) -> list[float | None]: ...
+
+
+def document_states(documents: list[dict]) -> list[dict]:
+    return [link_state(f'D{i + 1}', d.get('name', ''), d['url'], d.get('context', '')) for i, d in enumerate(documents)]
 
 
 def verdict_for(relevance: float | None) -> str:
@@ -176,6 +193,18 @@ class LLMJudge:
             return [LEVELS.get(str(answer.get(f'L{i + 1}', '')).strip().lower()) for i in range(len(chunk))]
         return self._batched(candidates, ask_chunk)
 
+    def older_editions(self, goal: str, documents: list[dict]) -> list[float | None]:
+        states = document_states(documents)
+
+        def ask_chunk(indices):
+            user = (f'Goal: {goal}\n\nDocuments:\n{json.dumps(states, ensure_ascii=False)}\n\n'
+                    f'{Q_OLDER.format(did="<id>")}\nYes when: {C_OLDER["true"]}\nNo when: {C_OLDER["false"]}\n\n'
+                    f'For each of {", ".join(f"D{i + 1}" for i in indices)}, answer one of: {", ".join(LEVELS)}.\n'
+                    f'Reply as {{"D1": "<answer>", ...}}.')
+            answer = self._ask(user) or {}
+            return [LEVELS.get(str(answer.get(f'D{i + 1}', '')).strip().lower()) for i in indices]
+        return self._batched(list(range(len(documents))), ask_chunk)
+
     def page_kinds(self, goal: str, links: list[dict]) -> list[tuple[str, float]]:
         kinds = self.profile.page_kinds
 
@@ -255,6 +284,9 @@ class FallbackJudge:
 
     def filter_values(self, goal, page_state, filters):
         return self._call('filter_values', goal, page_state, filters)
+
+    def older_editions(self, goal, documents):
+        return self._call('older_editions', goal, documents)
 
     @property
     def open(self) -> bool:

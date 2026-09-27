@@ -192,10 +192,52 @@ def mark_latest(documents: list) -> list:
     return superseded
 
 
-def apply_latest(result, latest: bool, include_rejected: bool = False):
+MAX_JUDGED_GROUPS = 25        # doubtful groups asked about per result; past it, the rest is kept
+MAX_GROUP_SIZE = 40           # a larger group is kept whole: too many editions to show in one question
+
+
+def _skeleton(doc) -> str:
+    """The identity with every number and month word taken out: 'etalon-2211' and 'etalon-2212' meet, and so do
+    'cm4' and 'cm5' - which is why a group formed this way is only a question, never an answer."""
+    text, ext = _identity(doc.url, doc.name)
+    key = _key(_TOKEN.sub(' ', text))
+    return f'{key}.{ext}' if ext else key
+
+
+def refine_latest(documents: list, goal: str, judge, superseded_at: float | None = None) -> list:
+    """Ask the relevance judge about the groups mark_latest could not settle, and return the documents it is
+    sure are older editions. A group is doubtful when its documents look alike once their numbers are taken out
+    but code did not order them all as one series ('ETALON-2211' beside 'ETALON-2212', '2026-Q1' beside
+    '2026-03', 'cm4' beside 'cm5'). Only a probability of at least SUPERSEDED_AT drops a document; anything less,
+    or no answer, keeps it."""
+    from .judge import SUPERSEDED_AT
+    threshold = SUPERSEDED_AT if superseded_at is None else superseded_at
+    groups: dict[str, list] = {}
+    for doc in documents:
+        if doc.verdict != 'rejected' and doc.latest_in_series is not False:
+            groups.setdefault(_skeleton(doc), []).append(doc)
+    doubtful = [members for members in groups.values() if 2 <= len(members) <= MAX_GROUP_SIZE
+                and not (len({d.series for d in members}) == 1 and all(d.latest_in_series for d in members))]
+    superseded = []
+    for members in doubtful[:MAX_JUDGED_GROUPS]:
+        for doc, p in zip(members, judge.older_editions(goal, [{'name': d.name, 'url': d.url} for d in members])):
+            if p is not None and p >= threshold:
+                doc.latest_in_series = False
+                superseded.append(doc)
+    return superseded
+
+
+def apply_latest(result, latest: bool, include_rejected: bool = False, judge=None):
     """Mark every document of an AgenticCrawlResult; with `latest`, drop the superseded ones from `downloads` and
-    count them in `superseded_count`. A caller that asked for rejected rows keeps the superseded ones too, marked."""
+    count them in `superseded_count`. A caller that asked for rejected rows keeps the superseded ones too, marked.
+
+    `judge` - a RelevanceJudge, or a callable returning one (or None) - settles the groups code could not order;
+    it is consulted only with `latest`. Without one, those groups are kept whole."""
     superseded = mark_latest(result.downloads)
+    if latest and judge is not None:
+        judge = judge() if callable(judge) and not hasattr(judge, 'older_editions') else judge
+        if judge is not None:
+            superseded += refine_latest(result.downloads, result.goal, judge)
     if latest:
         result.superseded_count = len(superseded)
         if not include_rejected:

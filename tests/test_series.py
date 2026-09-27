@@ -160,3 +160,77 @@ def test_product_numbers_are_identity_not_order():
     # cm4 and cm5 are two products: grouping them would drop one product's datasheet, so they stay apart
     docs = [doc('https://s.example/cm4-datasheet.pdf'), doc('https://s.example/cm5-datasheet.pdf')]
     assert mark_latest(docs) == [] and docs[0].series != docs[1].series
+
+
+class FakeEditionJudge:
+    """Answers older_editions from a dict of url -> probability, and records what it was asked."""
+
+    def __init__(self, probabilities):
+        self.probabilities, self.asked = probabilities, []
+
+    def older_editions(self, goal, documents):
+        self.asked.append([d['url'] for d in documents])
+        return [self.probabilities.get(d['url']) for d in documents]
+
+
+class TestJudgedLatest:
+    def test_the_judge_settles_what_code_could_not_order(self):
+        from docseek.series import refine_latest
+        urls = [f'https://s.example/ALAP-LAP_ETALON-{n}.pdf' for n in (2211, 2212, 2301)]
+        docs = [doc(u) for u in urls]
+        assert mark_latest(docs) == []                      # code cannot read 2211 as a date: nothing dropped
+        judge = FakeEditionJudge({urls[0]: 0.93, urls[1]: 0.85, urls[2]: 0.1})
+        superseded = refine_latest(docs, 'the latest product sheets', judge)
+        assert [d.url for d in superseded] == urls[:2] and [d.latest_in_series for d in docs][:2] == [False, False]
+
+    def test_below_the_threshold_or_without_an_answer_nothing_is_dropped(self):
+        from docseek.series import refine_latest
+        docs = [doc('https://s.example/cm4-datasheet.pdf'), doc('https://s.example/cm5-datasheet.pdf')]
+        mark_latest(docs)
+        judge = FakeEditionJudge({docs[0].url: 0.79})      # different products: the judge is not sure enough
+        assert refine_latest(docs, 'every datasheet', judge) == []
+        assert judge.asked == [[d.url for d in docs]]       # asked, because code could not tell
+
+    def test_a_series_code_ordered_cleanly_is_not_asked_about(self):
+        from docseek.series import refine_latest
+        docs = [doc('https://s.example/fund-a-2026-02.pdf'), doc('https://s.example/fund-a-2026-03.pdf')]
+        mark_latest(docs)
+        judge = FakeEditionJudge({})
+        refine_latest(docs, 'g', judge)
+        assert judge.asked == []
+
+    def test_apply_latest_asks_the_judge_only_when_latest_is_on(self):
+        urls = [f'https://s.example/ALAP-LAP_ETALON-{n}.pdf' for n in (2211, 2212)]
+
+        def result():
+            return AgenticCrawlResult(start_url='https://s.example/', goal='g', downloads=[doc(u) for u in urls])
+        judge = FakeEditionJudge({urls[0]: 0.95})
+        assert len(apply_latest(result(), latest=False, judge=lambda: judge).downloads) == 2 and judge.asked == []
+        filtered = apply_latest(result(), latest=True, judge=lambda: judge)
+        assert [d.url for d in filtered.downloads] == urls[1:] and filtered.superseded_count == 1
+        assert len(apply_latest(result(), latest=True, judge=lambda: None).downloads) == 2   # no judge: keep
+
+
+def test_both_judges_ask_about_every_document_with_the_whole_list_in_view():
+    from docseek.jev import JevClient
+    from docseek.judge import LLMJudge
+
+    class FakeLLM:
+        model, usage = 'fake', type('U', (), {'requests': 0})()
+
+        def complete_json(self, system, user):
+            assert 'D1' in user and 'D2' in user
+            return {'D1': 'clearly_yes', 'D2': 'probably_no'}
+    docs = [{'name': 'Report 2211', 'url': 'https://s.example/r-2211.pdf'},
+            {'name': 'Report 2212', 'url': 'https://s.example/r-2212.pdf'}]
+    assert LLMJudge(FakeLLM()).older_editions('g', docs) == [0.95, 0.25]
+
+    jev = JevClient(api_key='k')
+    seen = {}
+
+    def ask(state, questions):
+        seen.update(state=state, questions=questions)
+        return {q: {'noul': 0.9 if q == 'q1' else 0.2} for q in questions}
+    jev.ask = ask
+    assert jev.older_editions('g', docs) == [0.9, 0.2]
+    assert [d['id'] for d in seen['state']['documents']] == ['D1', 'D2'] and set(seen['questions']) == {'q1', 'q2'}

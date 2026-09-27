@@ -26,7 +26,7 @@ def run_site(entry: dict, store, args) -> dict:
     from docseek.codegen.explorer import codegen_llm
     from docseek.codegen.programs import generate_program, program_key, run_saved
     from docseek.judge import make_judge
-    from docseek.series import mark_latest
+    from docseek.series import mark_latest, refine_latest
 
     site = entry['site']
     start_url = entry.get('start_url') or start_url_for(site)
@@ -53,6 +53,7 @@ def run_site(entry: dict, store, args) -> dict:
         run, downloads = run_saved(program, make_judge(args.judge, entry['profile']))
         mark_latest(downloads)
         if entry.get('latest'):
+            refine_latest(downloads, entry['goal'], make_judge(args.judge, entry['profile']))
             downloads = [d for d in downloads if d.latest_in_series is not False]
         scored = score_run(downloads, {}, entry['expected'], entry.get('keep_query', False),
                            entry.get('identity_re'), entry.get('goal_year'))

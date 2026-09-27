@@ -296,10 +296,20 @@ def _start_generation(store: ProgramStore, url: str, goal: str, judge: str | Non
     return 'started'
 
 
+def _latest_judge(payload: DiscoverRequest) -> RelevanceJudge | None:
+    """The judge that settles series code could not order; without one they are kept whole."""
+    try:
+        return make_judge(payload.judge, load_profile(payload.profile))
+    except (JudgeUnavailable, UnknownProfile) as exc:
+        logger.info('[latest] no judge for doubtful series (%s): they are kept whole', exc)
+        return None
+
+
 def _discover(payload: DiscoverRequest, llm: LLMClient, on_event=None):
     """A crawl, or with `programs` the hybrid: the site's program when it is healthy, the crawl otherwise."""
     if not payload.programs:
-        return apply_latest(_run_crawl(payload, llm, on_event), payload.latest, payload.include_rejected)
+        return apply_latest(_run_crawl(payload, llm, on_event), payload.latest, payload.include_rejected,
+                            judge=lambda: _latest_judge(payload))
     store = _require_programs_dir()
     result = hybrid_discover(payload.url, payload.goal, store=store,
                              judge=_program_judge(payload.judge, payload.profile),
@@ -307,7 +317,7 @@ def _discover(payload: DiscoverRequest, llm: LLMClient, on_event=None):
     if result.program['path'] == 'crawl':
         result.program['generation'] = _start_generation(store, payload.url, payload.goal, payload.judge,
                                                          payload.profile)
-    return apply_latest(result, payload.latest, payload.include_rejected)
+    return apply_latest(result, payload.latest, payload.include_rejected, judge=lambda: _latest_judge(payload))
 
 
 @app.post('/v1/discover')
