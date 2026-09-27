@@ -65,6 +65,8 @@ class AgenticDownload(BaseModel):
     source: Literal['page', 'sitemap', 'api', 'agent', 'program'] = 'agent'
     period: str | None = None
     year: str | None = None      # the year of the document's dated line, read by code, a Facet
+    series: str | None = None    # the document's identity with its period taken out (docseek.series), a Facet
+    latest_in_series: bool | None = None   # newest of its series; None: no period, or rejected
 
 
 class CrawlPlan(BaseModel):
@@ -92,6 +94,7 @@ class AgenticCrawlResult(BaseModel):
     decision_model: str = ''
     relevance_model: str | None = None
     rejected_count: int = 0
+    superseded_count: int = 0    # with `latest`: older documents of a series left out
     jev_requests: int = 0
     jev_cost_usd: float = 0.0
     escalations: dict[str, int] = Field(default_factory=dict)

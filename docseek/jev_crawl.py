@@ -41,6 +41,7 @@ from .llm import LLMClient
 from .models import AgenticCrawlResult, AgenticDownload
 from .reach import OffDomainPolicy, bare_host, is_crawlable  # noqa: F401 - re-exported
 from .recipes import RecipeStore, recipe_from_steps, replay as replay_recipe
+from .series import period_of  # noqa: F401 - re-exported: the period Facet is read by docseek.series
 from .scraper import (
     _DEFAULT_USER_AGENT, _TRACKING_SCRIPT_HOSTS, _try_accept_cookies, _try_dismiss_form_disclaimer,
     detect_canvas_page, select_option_anywhere,
@@ -84,7 +85,6 @@ BLOCKED_RESOURCES = {'image', 'media', 'font'}
 LANG_SEGMENTS = {'en', 'de', 'hu', 'fr', 'it', 'es', 'sk', 'ro', 'pl', 'cs', 'hr', 'sl', 'sr', 'ru', 'uk'}
 _DOC_PATH_HINTS = ('/wp-content/uploads/', '/documents/', '/download')
 _DOC_EXTENSIONS = ('.pdf', '.xlsx', '.xls', '.docx', '.doc', '.csv', '.pptx', '.ppt', '.zip')
-_PERIOD_RE = re.compile(r'(20\d{2})[-_. ]?(0[1-9]|1[0-2])')
 _CONTROL_CHARS = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 # Page text written at the models rather than at readers. Flagged and counted, never acted on.
 _INJECTION_RE = re.compile(
@@ -386,10 +386,6 @@ def year_of(text: str) -> str | None:
     return period[:4] if period else None
 
 
-def period_of(text: str) -> str | None:
-    """Year-month read out of a name or URL by code. Reported as a Facet, never used to filter."""
-    m = _PERIOD_RE.search(text or '')
-    return f'{m.group(1)}-{m.group(2)}' if m else None
 
 
 

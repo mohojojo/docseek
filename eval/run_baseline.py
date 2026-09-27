@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
+from docseek.series import apply_latest
+
 _HERE = Path(__file__).resolve().parent
 _GROUND_TRUTH = _HERE / 'ground_truth'
 _REPORTS = _HERE / 'reports'
@@ -86,6 +88,7 @@ def load_ground_truth(sites_filter: list[str] | None) -> list[dict]:
             'identity_re': identity_re,
             'goal_year': d.get('goal_year'),
             'profile': d.get('profile', 'generic'),   # the domain profile the judge words its questions with
+            'latest': bool(d.get('latest')),          # the goal asks for each series' newest document
             'shape': d.get('shape', ''),
         })
     return entries
@@ -131,6 +134,7 @@ def run_one(agentic_crawl, entry: dict, api_key: str, model: str,
         on_event=on_event,
         enable_learning=False,   # baseline must not mutate the pattern store between runs
     )
+    apply_latest(result, entry.get('latest', False))
     found = {identity(d.url, entry.get('keep_query', False), entry.get('identity_re')) for d in result.downloads}
     sc = score(found, entry['expected'])
     sc.update({

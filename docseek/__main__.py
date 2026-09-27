@@ -44,6 +44,7 @@ def _discover(argv: list[str]) -> None:
     parser.add_argument('--max-seconds', type=float, default=180)
     parser.add_argument('--max-depth', type=int, default=3)
     parser.add_argument('--include-rejected', action='store_true', help='Also print rejected candidates')
+    parser.add_argument('--latest', action='store_true', help='Keep only the newest document of each series')
     parser.add_argument('--programs', action='store_true',
                         help="Answer from the site's generated program when it is healthy; after a crawl, write one")
     _programs_dir_arg(parser)
@@ -64,7 +65,7 @@ def _discover(argv: list[str]) -> None:
     payload = server.DiscoverRequest(
         url=args.url, goal=args.goal, profile=args.profile, judge=args.judge, decision_layer=args.decision_layer,
         model=args.model, max_pages=args.max_pages, max_seconds=args.max_seconds, max_depth=args.max_depth,
-        include_rejected=args.include_rejected, programs=args.programs,
+        include_rejected=args.include_rejected, latest=args.latest, programs=args.programs,
     )
     try:
         result = server._discover(payload, server._agent_llm(payload), on_event=on_event)

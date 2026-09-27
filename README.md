@@ -92,6 +92,18 @@ The client adapts to what a server accepts (for example OpenAI's reasoning model
 `max_completion_tokens` and no `temperature`). The browsing agent needs a model with tool calling;
 screenshots need a vision-capable model.
 
+## The latest of each series
+
+The relevance judge scores what a document *is*, never which period it covers, so a goal like "each fund's
+latest factsheet" finds the whole archive. Code answers the "latest" part: every document carries a `period`
+facet (`2026-03`, `2026-Q1`, `2026-H1` or `2026`, read from its name and URL in English, German, Hungarian,
+French, Spanish and Italian) and a `series` facet - its file name with the period taken out, or its title when
+the file name says nothing. `latest_in_series` marks the newest of each series.
+
+Set `"latest": true` (CLI `--latest`) to keep only those: older documents of a series are counted in
+`superseded_count` instead of returned. Every series keeps its newest document, however old; documents with no
+readable period are kept, since there is nothing to compare them by.
+
 ## Generated programs
 
 For a site you query again and again, docseek can write a **discovery program**: a coding agent explores the site
@@ -162,12 +174,13 @@ Main request fields for `/v1/discover`:
 | `profile` | `generic` | Domain profile name, or a path to a profile file. |
 | `max_pages`, `max_seconds`, `max_depth` | 10, 180, 3 | Crawl budget. |
 | `same_domain_only`, `allowed_hosts` | `true`, `[]` | Off-domain policy: with `same_domain_only: false` the crawl may cross to one host linked from the start site. |
+| `latest` | `false` | Keep only the newest document of each series (see above). |
 | `programs` | `false` | Answer from the site's generated program when it is healthy (needs `PROGRAMS_DIR`). |
 | `include_rejected` | `false` | Also return rejected candidates, to see what the judge threw away. |
 | `model` | `LLM_MODEL` | Agent model override. |
 
-The result lists the documents with `relevance`, `verdict`, `source` (page, sitemap, api, agent), `period` and
-`year`, plus `stop_reason`, token counts and which model decided.
+The result lists the documents with `relevance`, `verdict`, `source` (page, sitemap, api, agent, program),
+`period`, `year`, `series` and `latest_in_series`, plus `stop_reason`, token counts and which model decided.
 
 ## Crawling responsibly
 

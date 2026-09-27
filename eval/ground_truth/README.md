@@ -35,6 +35,7 @@ ground truth stays local unless you choose to commit it.
 | `match_query` | no | `true` keeps the query string in a document's identity, for sites that tell documents apart only by query (`getfile.aspx?id=123`). |
 | `identity_re` | no | A regex with one capture group that identifies a document. Use it when one document is served under several URLs (`?download=12:report`, `?download=12:report&start=50`, `/file/12-report`). Matching URLs are compared as `<host>#<group>`; non-matching URLs fall back to the normal rule. |
 | `goal_year` | no | For a goal that asks for one year. `run_jev` then scores only candidates dated that year or undated, as a consumer filtering on the year would. |
+| `latest` | no | `true` for a goal that asks for each series' newest document. The runners then score what `"latest": true` returns: older documents of a series are left out. |
 | `profile` | no | The domain profile the relevance judge words its questions with: a bundled name (`generic`, `fund-reports`) or a path to a profile JSON. Default `generic`. |
 | `shape` | no | Free text describing what the site tests (for example "paginated archive"). Not used in scoring. |
 | `notes` | no | Free text. Not used in scoring. |

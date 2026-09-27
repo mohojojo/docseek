@@ -30,6 +30,7 @@ from .codegen.explorer import codegen_llm
 from .codegen.programs import ProgramStore, check_drift, generate_program, hybrid_discover, program_key
 from .patterns import PatternStore
 from .scraper import _DEFAULT_USER_AGENT
+from .series import apply_latest
 
 PATTERNS_DIR = os.environ.get('PATTERNS_DIR')
 PROGRAMS_DIR = os.environ.get('PROGRAMS_DIR')
@@ -109,6 +110,14 @@ class DiscoverRequest(BaseModel):
         description=(
             'Hosts the jev layer may crawl besides the seed host, even without a link from it. '
             'Ignored when same_domain_only is true.'
+        ),
+    )
+    latest: bool = Field(
+        default=False,
+        description=(
+            'Keep only the newest document of each series (a fund\'s latest factsheet, not its archive). Older ones '
+            'are counted in superseded_count. Every document carries its series and latest_in_series Facets '
+            'either way; set this when the goal asks for the latest.'
         ),
     )
     programs: bool = Field(
@@ -281,7 +290,7 @@ def _start_generation(store: ProgramStore, url: str, goal: str, judge: str | Non
 def _discover(payload: DiscoverRequest, llm: LLMClient, on_event=None):
     """A crawl, or with `programs` the hybrid: the site's program when it is healthy, the crawl otherwise."""
     if not payload.programs:
-        return _run_crawl(payload, llm, on_event)
+        return apply_latest(_run_crawl(payload, llm, on_event), payload.latest, payload.include_rejected)
     store = _require_programs_dir()
     result = hybrid_discover(payload.url, payload.goal, store=store,
                              judge=_program_judge(payload.judge, payload.profile),
@@ -289,7 +298,7 @@ def _discover(payload: DiscoverRequest, llm: LLMClient, on_event=None):
     if result.program['path'] == 'crawl':
         result.program['generation'] = _start_generation(store, payload.url, payload.goal, payload.judge,
                                                          payload.profile)
-    return result
+    return apply_latest(result, payload.latest, payload.include_rejected)
 
 
 @app.post('/v1/discover')
