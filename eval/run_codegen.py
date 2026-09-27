@@ -22,6 +22,51 @@ _HERE = Path(__file__).resolve().parent
 _REPORTS = _HERE / 'reports'
 
 
+def run_site(entry: dict, store, args) -> dict:
+    from docseek.codegen.explorer import codegen_llm
+    from docseek.codegen.programs import generate_program, program_key, run_saved
+    from docseek.judge import make_judge
+    from docseek.series import mark_latest
+
+    site = entry['site']
+    start_url = entry.get('start_url') or start_url_for(site)
+    key = program_key(start_url, entry['goal'])
+    generation = None
+    if args.regenerate or store.load(key) is None:
+        llm = codegen_llm()
+        if llm is None:
+            print(f'=== {site}: no program and no coding model (CODEGEN_MODEL / LLM_MODEL) - skipped', file=sys.stderr)
+            return {'goal': entry['goal'], 'generation': None, 'runs': []}
+        print(f'=== {site}: generating', file=sys.stderr, flush=True)
+        program, generation = generate_program(store, start_url, entry['goal'], llm=llm,
+                                               judge=make_judge(args.judge, entry['profile']))
+        generation = {k: v for k, v in generation.items() if k != 'runs'}
+        print(f"    {'submitted' if generation.get('submitted') else 'NOT submitted'} in {generation.get('turns')} turns, "
+              f"{generation.get('seconds')} s, tokens {generation.get('usage')}"
+              + (f", stopped: {generation['stopped']}" if generation.get('stopped') else ''), file=sys.stderr)
+        if program is None:
+            print('    no program produced', file=sys.stderr)
+            return {'goal': entry['goal'], 'generation': generation, 'runs': []}
+    program = store.load(key)
+    runs = []
+    for i in range(args.replays):
+        run, downloads = run_saved(program, make_judge(args.judge, entry['profile']))
+        mark_latest(downloads)
+        if entry.get('latest'):
+            downloads = [d for d in downloads if d.latest_in_series is not False]
+        scored = score_run(downloads, {}, entry['expected'], entry.get('keep_query', False),
+                           entry.get('identity_re'), entry.get('goal_year'))
+        scored.update({'returned_documents': len(downloads), 'error': run['error'], 'seconds': run['seconds'],
+                       'fetches': run['requests'], 'renders': run['renders'], 'fetch_failures': run['fetch_failures']})
+        runs.append(scored)
+        a = scored['accepted']
+        print(f"    replay {i + 1}: acc R={a['recall']:.2f} P={a['precision']:.2f} | returned {len(downloads)}"
+              f" in {run['seconds']} s, {run['requests']} fetches{'  ERROR' if run['error'] else ''}",
+              file=sys.stderr, flush=True)
+    return {'expected': entry['expected_count'], 'goal': entry['goal'], 'key': key, 'generation': generation,
+            'runs': runs}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog='eval.run_codegen')
     ap.add_argument('--sites', nargs='*', default=None)
@@ -37,10 +82,8 @@ def main() -> None:
     except Exception:
         pass
 
-    from docseek.codegen.explorer import codegen_llm
-    from docseek.codegen.programs import ProgramStore, generate_program, program_key, run_saved
+    from docseek.codegen.programs import ProgramStore
     from docseek.judge import JudgeUnavailable, make_judge
-    from docseek.series import mark_latest
 
     store = ProgramStore(args.programs_dir)
     entries = load_ground_truth(args.sites)
@@ -58,44 +101,11 @@ def main() -> None:
     out = _REPORTS / f'codegen_{stamp}.json'
     report = {'replays': args.replays, 'sites': {}}
     for entry in entries:
-        site = entry['site']
-        start_url = entry.get('start_url') or start_url_for(site)
-        key = program_key(start_url, entry['goal'])
-        generation = None
-        if args.regenerate or store.load(key) is None:
-            llm = codegen_llm()
-            if llm is None:
-                print(f'=== {site}: no program and no coding model (CODEGEN_MODEL / LLM_MODEL) - skipped', file=sys.stderr)
-                continue
-            print(f'=== {site}: generating', file=sys.stderr, flush=True)
-            program = generate_program(store, start_url, entry['goal'], llm=llm,
-                                       judge=make_judge(args.judge, entry['profile']))
-            if program is None:
-                print('    no program produced', file=sys.stderr)
-                report['sites'][site] = {'goal': entry['goal'], 'generation': None, 'runs': []}
-                continue
-            generation = {k: v for k, v in program.meta.items() if k not in ('notes', 'runs')}
-            print(f"    {'submitted' if generation['submitted'] else 'NOT submitted'} in {generation['turns']} turns, "
-                  f"{generation['seconds']} s, tokens {generation['usage']}", file=sys.stderr)
-        program = store.load(key)
-        runs = []
-        for i in range(args.replays):
-            run, downloads = run_saved(program, make_judge(args.judge, entry['profile']))
-            mark_latest(downloads)
-            if entry.get('latest'):
-                downloads = [d for d in downloads if d.latest_in_series is not False]
-            scored = score_run(downloads, {}, entry['expected'], entry.get('keep_query', False),
-                               entry.get('identity_re'), entry.get('goal_year'))
-            scored.update({'returned_documents': len(downloads), 'error': run['error'], 'seconds': run['seconds'],
-                           'fetches': run['requests'], 'renders': run['renders'],
-                           'fetch_failures': run['fetch_failures']})
-            runs.append(scored)
-            a = scored['accepted']
-            print(f"    replay {i + 1}: acc R={a['recall']:.2f} P={a['precision']:.2f} | returned {len(downloads)}"
-                  f" in {run['seconds']} s, {run['requests']} fetches{'  ERROR' if run['error'] else ''}",
-                  file=sys.stderr, flush=True)
-        report['sites'][site] = {'expected': entry['expected_count'], 'goal': entry['goal'], 'key': key,
-                                 'generation': generation, 'runs': runs}
+        try:
+            report['sites'][entry['site']] = run_site(entry, store, args)
+        except Exception as exc:  # noqa: BLE001 - one site's failure must not lose the others
+            print(f"    FAILED: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            report['sites'][entry['site']] = {'goal': entry['goal'], 'error': f'{type(exc).__name__}: {exc}'}
         out.write_text(json.dumps(report, indent=1, ensure_ascii=False, default=str))
     print(f'Report: {out}', file=sys.stderr)
 

@@ -104,3 +104,41 @@ def test_one_cache_breakpoint_moves_to_the_newest_message():
     _move_cache_breakpoint(messages)
     marked = [b for m in messages for b in m['content'] if isinstance(b, dict) and 'cache_control' in b]
     assert marked == [messages[2]['content'][0]]
+
+
+def test_several_tool_calls_in_one_turn_are_all_answered():
+    class TwoAtOnce(ScriptedLLM):
+        def chat(self, system, messages, tools, *, force_tool=True, max_tokens=8192):
+            assert force_tool is False                      # the model may call several tools per turn
+            self.seen.append(json.loads(json.dumps(messages)))
+            if len(self.seen) == 1:
+                content = [{'type': 'tool_use', 'id': 'a', 'name': 'fetch_page',
+                            'input': {'url': 'https://site.example/', 'view': 'links'}},
+                           {'type': 'tool_use', 'id': 'b', 'name': 'run_program', 'input': {'code': GOOD}}]
+            else:
+                content = [{'type': 'tool_use', 'id': 'c', 'name': 'submit_program', 'input': {'code': GOOD, 'notes': ''}}]
+            return ChatReply(content=content, stop_reason='tool_use')
+    llm = TwoAtOnce([])
+    result = explorer(llm).explore()
+    answered = [b['tool_use_id'] for b in llm.seen[1][-1]['content'] if b.get('type') == 'tool_result']
+    assert answered == ['a', 'b'] and result['submitted'] and result['turns'] == 2
+
+
+def test_a_failing_model_keeps_the_best_draft(monkeypatch):
+    import docseek.codegen.explorer as explorer_module
+    monkeypatch.setattr(explorer_module.time, 'sleep', lambda s: None)
+
+    class Flaky(ScriptedLLM):
+        def chat(self, *args, **kwargs):
+            if len(self.seen) >= 1:
+                raise ConnectionError('ssl alert bad record mac')
+            return super().chat(*args, **kwargs)
+    result = explorer(Flaky([('run_program', {'code': GOOD})])).explore()
+    assert result['code'] == GOOD and 'ConnectionError' in result['stopped'] and result['turns'] == 1
+
+
+def test_submitted_code_that_never_ran_is_run_once_for_its_baseline():
+    llm = ScriptedLLM([('submit_program', {'code': GOOD, 'notes': ''})])
+    ex = explorer(llm)
+    result = ex.explore()
+    assert result['generated_kept'] == 1 and len(ex.runs) == 1

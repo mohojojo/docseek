@@ -167,19 +167,20 @@ def hybrid_discover(start_url: str, goal: str, *, store: ProgramStore, judge: Re
 
 
 def generate_program(store: ProgramStore, start_url: str, goal: str, *, llm, judge: RelevanceJudge,
-                     explorer_cls=None) -> Program | None:
-    """Write a program for (start_url, goal) and store it, replacing a stale one. None when the agent produced no
-    code. Takes minutes and a strong coding model; callers run it in the background."""
+                     explorer_cls=None) -> tuple[Program | None, dict]:
+    """Write a program for (start_url, goal) and store it, replacing a stale one: (program, the agent's report).
+    The program is None when the agent produced no code; the report then says how far it got. Takes minutes and a
+    strong coding model; callers run it in the background."""
     from .explorer import Explorer
     result = (explorer_cls or Explorer)(start_url, goal, llm=llm, judge=judge).explore()
-    if not result['code']:
-        return None
-    meta = {'goal': goal, 'start_url': start_url, **{k: v for k, v in result.items() if k != 'code'},
-            'generated': time.strftime('%Y-%m-%dT%H:%M:%S'), 'stale': False,
-            'last_kept': result.get('generated_kept')}
+    report = {k: v for k, v in result.items() if k != 'code'}
+    if not result.get('code'):
+        return None, report
+    meta = {'goal': goal, 'start_url': start_url, **report, 'generated': time.strftime('%Y-%m-%dT%H:%M:%S'),
+            'stale': False, 'last_kept': result.get('generated_kept')}
     program = Program(program_key(start_url, goal), result['code'], meta)
     store.save(program)
-    return program
+    return program, report
 
 
 def replay(program: Program, runner=run_program) -> dict:

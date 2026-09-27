@@ -38,6 +38,14 @@ def site_of(host: str) -> str:
     return '.'.join(parts[-2:])
 
 
+def _post_data(request) -> str:
+    """A request's POST body as text, for the agent to read; a binary (compressed) body is not text."""
+    try:
+        return (request.post_data or '')[:300]
+    except UnicodeDecodeError:
+        return '(binary body)'
+
+
 def endpoint_of(url: str) -> str:
     u = urlparse(url)
     return f'{bare_host(u.netloc)}{u.path}'
@@ -163,7 +171,7 @@ class Fetcher:
             calls: list[dict] = []
             page.on('response', lambda r: calls.append({
                 'url': r.url, 'method': r.request.method, 'status': r.status,
-                'post_data': (r.request.post_data or '')[:300],
+                'post_data': _post_data(r.request),
                 'content_type': r.headers.get('content-type', '').split(';')[0]})
                 if r.request.resource_type in ('xhr', 'fetch') and len(calls) < 120 else None)
             done = []

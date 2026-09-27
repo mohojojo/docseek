@@ -276,8 +276,9 @@ def _start_generation(store: ProgramStore, url: str, goal: str, judge: str | Non
 
     def work() -> None:
         try:
-            program = generate_program(store, url, goal, llm=llm, judge=make_judge(judge, load_profile(profile)))
-            logger.info('[programs] %s: %s', key, 'written' if program else 'no program produced')
+            program, report = generate_program(store, url, goal, llm=llm, judge=make_judge(judge, load_profile(profile)))
+            logger.info('[programs] %s: %s', key, 'written' if program else
+                        f"no program produced ({report.get('stopped') or report.get('notes')})")
         except Exception:  # noqa: BLE001 - a background job has no caller to raise to
             logger.exception('[programs] generating %s failed', key)
         finally:

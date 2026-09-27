@@ -100,9 +100,10 @@ def _generate(argv: list[str]) -> None:
         judge = make_judge(args.judge, load_profile(args.profile))
     except (JudgeUnavailable, UnknownProfile) as exc:
         _fail(str(exc))
-    program = generate_program(ProgramStore(args.programs_dir), args.url, args.goal, llm=llm, judge=judge)
+    program, report = generate_program(ProgramStore(args.programs_dir), args.url, args.goal, llm=llm, judge=judge)
     if program is None:
-        _fail('the agent produced no program')
+        _fail(f"the agent produced no program ({report.get('stopped') or report.get('notes')}, "
+              f"{report.get('turns')} turns)")
     meta = program.meta
     print(json.dumps({'key': program.key, **{k: meta.get(k) for k in (
         'submitted', 'turns', 'model', 'usage', 'seconds', 'generated_kept', 'data_hosts', 'post_endpoints', 'notes')}},

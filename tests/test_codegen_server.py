@@ -63,7 +63,7 @@ def test_without_a_program_the_crawl_answers_and_a_program_is_written_in_the_bac
     monkeypatch.setattr(server, '_run_crawl', crawl_result)
     monkeypatch.setattr(server, 'codegen_llm', lambda: object())
     written = []
-    monkeypatch.setattr(server, 'generate_program', lambda store, url, goal, llm, judge: written.append((url, goal)))
+    monkeypatch.setattr(server, 'generate_program', lambda store, url, goal, llm, judge: (written.append((url, goal)), {}))
     body = client.post('/v1/discover', json={'url': URL, 'goal': GOAL, 'programs': True}).json()
     assert body['program'] == {'key': KEY, 'path': 'crawl', 'reason': 'no_program', 'generation': 'started'}
     assert body['downloads'][0]['url'].endswith('crawled.pdf')
@@ -106,7 +106,7 @@ def test_generating_needs_a_coding_model(client, monkeypatch):
 
 def test_generating_starts_in_the_background(client, monkeypatch):
     monkeypatch.setattr(server, 'codegen_llm', lambda: object())
-    monkeypatch.setattr(server, 'generate_program', lambda *a, **k: time.sleep(0.2))
+    monkeypatch.setattr(server, 'generate_program', lambda *a, **k: (time.sleep(0.2), {}))
     response = client.post('/v1/programs', json={'url': URL, 'goal': GOAL})
     assert response.status_code == 202 and response.json() == {'key': KEY, 'generation': 'started'}
     again = client.post('/v1/programs', json={'url': URL, 'goal': GOAL}).json()

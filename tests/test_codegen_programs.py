@@ -107,7 +107,8 @@ class TestGenerate:
             def explore(self):
                 return {'code': 'def discover(fetch, render):\n    return [1]', 'notes': 'n', 'submitted': True,
                         'data_hosts': ['api.backend.example'], 'post_endpoints': [], 'generated_kept': 7}
-        program = generate_program(store, START, GOAL, llm=None, judge=FakeJudge(), explorer_cls=FakeExplorer)
+        program, report = generate_program(store, START, GOAL, llm=None, judge=FakeJudge(), explorer_cls=FakeExplorer)
+        assert report['notes'] == 'n' and 'code' not in report
         loaded = store.load(KEY)
         assert program.key == KEY and loaded.code.endswith('return [1]\n')
         assert loaded.meta['stale'] is False and loaded.meta['last_kept'] == 7 and 'failures' not in loaded.meta
@@ -121,7 +122,7 @@ class TestGenerate:
             def explore(self):
                 return {'code': ''}
         store = ProgramStore(tmp_path)
-        assert generate_program(store, START, GOAL, llm=None, judge=FakeJudge(), explorer_cls=Empty) is None
+        assert generate_program(store, START, GOAL, llm=None, judge=FakeJudge(), explorer_cls=Empty) == (None, {})
         assert store.keys() == []
 
 

@@ -18,7 +18,7 @@ from urllib.parse import urljoin
 
 from ..jev_crawl import clean_text
 from ..judge import RelevanceJudge, verdict_for
-from ..llm import LLMClient, make_llm
+from ..llm import LLMClient, LLMUnavailable, make_llm
 from .fetcher import Fetcher
 from .sandbox import ALLOWED_MODULES, FetchRefused, run_program
 
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 MAX_TURNS = int(os.environ.get('CODEGEN_MAX_TURNS') or 45)
 MAX_INPUT_TOKENS = int(os.environ.get('CODEGEN_MAX_INPUT_TOKENS') or 3_000_000)   # cached reads included
 MAX_OUTPUT_TOKENS = 16_000
+MODEL_CALL_ATTEMPTS = 3
 PAGE_CHARS = 12_000
 
 SYSTEM = f"""You write site-specific document discovery programs.
@@ -180,6 +181,20 @@ class Explorer:
         self.best: tuple[int, str, int] = (-1, '', 0)      # (accepted, code, kept) of the best run_program draft
         self._kept_by_code: dict[str, int] = {}
 
+    def _chat(self, messages: list[dict]):
+        """One model turn. The model may call several tools at once, as an engineer reads several pages at once;
+        a dropped connection is retried, a refusal for good (no credit, bad key) is not."""
+        for attempt in range(1, MODEL_CALL_ATTEMPTS + 1):
+            try:
+                return self.llm.chat(SYSTEM, messages, TOOLS, force_tool=False, max_tokens=MAX_OUTPUT_TOKENS)
+            except LLMUnavailable:
+                raise
+            except Exception as exc:  # noqa: BLE001 - network and server errors: try again
+                if attempt == MODEL_CALL_ATTEMPTS:
+                    raise
+                logger.warning('[codegen] model call failed (%s), retrying', exc)
+                time.sleep(5 * attempt)
+
     @property
     def input_tokens(self) -> int:
         return self.usage['input'] + self.usage['cache_read'] + self.usage['cache_write']
@@ -279,13 +294,19 @@ class Explorer:
         messages: list[dict] = [{'role': 'user', 'content': f'Website: {self.start_url}\nGoal: {self.goal}'}]
         submitted = None
         turns = 0
+        stopped = None
         try:
             for turn in range(1, self.max_turns + 1):
                 if self.input_tokens > self.max_input_tokens:
                     logger.info('[codegen] input token cap %d reached', self.max_input_tokens)
                     break
                 _move_cache_breakpoint(messages)
-                reply = self.llm.chat(SYSTEM, messages, TOOLS, force_tool=True, max_tokens=MAX_OUTPUT_TOKENS)
+                try:
+                    reply = self._chat(messages)
+                except Exception as exc:  # noqa: BLE001 - keep the best draft rather than lose the exploration
+                    stopped = f'model call failed: {type(exc).__name__}: {str(exc)[:200]}'
+                    logger.warning('[codegen] %s', stopped)
+                    break
                 turns = turn
                 self.usage['input'] += reply.input_tokens
                 self.usage['output'] += reply.output_tokens
@@ -311,16 +332,18 @@ class Explorer:
                 messages.append({'role': 'user', 'content': results})
                 if submitted:
                     break
+            if submitted and submitted['code'] not in self._kept_by_code:
+                self.run_report(submitted['code'])          # the health baseline: what the final code keeps
         finally:
             self.fetcher.close()
         if submitted:
             code, notes = submitted['code'], submitted['notes']
-            kept = self._kept_by_code.get(code, self.best[2] if code == self.best[1] else None)
+            kept = self._kept_by_code.get(code)
         elif self.best[1]:
             code, notes, kept = self.best[1], f'not submitted; best draft ({self.best[0]} accepted)', self.best[2]
         else:
             code, notes, kept = '', 'not submitted', None
-        return {'code': code, 'notes': notes, 'submitted': bool(submitted), 'turns': turns,
+        return {'code': code, 'notes': notes, 'submitted': bool(submitted), 'turns': turns, 'stopped': stopped,
                 'data_hosts': sorted(self.fetcher.data_hosts), 'post_endpoints': sorted(self.fetcher.post_endpoints),
                 'model': self.llm.model, 'usage': dict(self.usage), 'seconds': round(time.monotonic() - started, 1),
                 'runs': self.runs, 'generated_kept': kept}
