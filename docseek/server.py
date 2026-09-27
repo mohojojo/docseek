@@ -6,6 +6,7 @@ import os
 import time
 from collections.abc import Generator
 from queue import Empty, Queue
+from importlib.metadata import version as _package_version
 from threading import Lock, Thread
 
 from typing import Literal
@@ -39,7 +40,7 @@ _WEB_SEARCH_COMPATIBLE_MODELS: frozenset[str] = frozenset({
     'claude-opus-4-7',
 })
 
-app = FastAPI(title='docseek', version='0.2.0')
+app = FastAPI(title='docseek', version=_package_version('docseek'))
 
 
 class DiscoverRequest(BaseModel):

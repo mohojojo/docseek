@@ -38,11 +38,22 @@ same LLM configuration.
 ## Quick start
 
 ```bash
-git clone <this repo> && cd docseek
+pip install docseek
+playwright install chromium
+```
+
+or from source:
+
+```bash
+git clone https://github.com/mohojojo/docseek && cd docseek
 uv venv && source .venv/bin/activate      # or python -m venv .venv
 uv pip install -e ".[dev]"
 playwright install chromium
+```
 
+Then start the API:
+
+```bash
 export ANTHROPIC_API_KEY=...              # or configure any other model, see below
 uvicorn docseek.server:app --port 8010
 ```

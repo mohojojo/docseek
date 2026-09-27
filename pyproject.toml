@@ -28,6 +28,10 @@ dependencies = [
     "uvicorn>=0.30.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/mohojojo/docseek"
+Issues = "https://github.com/mohojojo/docseek/issues"
+
 [project.scripts]
 docseek = "docseek.__main__:main"
 
