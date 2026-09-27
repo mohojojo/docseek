@@ -172,3 +172,13 @@ Build a set from `run_jev` snapshots: `run.json` lists each candidate's `url`, `
 `text`) and `source_page` (use it as `batch`), and the `harvest_*.json` files hold the page
 context. Label each candidate by hand. The script prints precision and recall of the `accepted` band per site and pooled, and
 writes every prediction to the report.
+
+### run_codegen: generated programs
+
+```sh
+.venv/bin/python -m eval.run_codegen --sites example.com                  # generate if missing, 2 replays
+.venv/bin/python -m eval.run_codegen --sites example.com --regenerate --replays 1
+```
+
+Generation needs a coding model (`CODEGEN_MODEL`, or `LLM_MODEL`); replays need only the judge. Programs are
+kept in `eval/programs/` (ignored by git) and reused until `--regenerate`. Scores mean the same as `run_jev`'s.

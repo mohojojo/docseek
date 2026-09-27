@@ -6,7 +6,7 @@ import os
 import time
 from collections.abc import Generator
 from queue import Empty, Queue
-from threading import Thread
+from threading import Lock, Thread
 
 from typing import Literal
 
@@ -25,10 +25,13 @@ from .llm import LLMClient, make_llm
 from .profile import UnknownProfile, available_profiles, load_profile
 from .jev_crawl import jev_crawl
 from .models import SearchSitesResponse
+from .codegen.explorer import codegen_llm
+from .codegen.programs import ProgramStore, check_drift, generate_program, hybrid_discover, program_key
 from .patterns import PatternStore
 from .scraper import _DEFAULT_USER_AGENT
 
 PATTERNS_DIR = os.environ.get('PATTERNS_DIR')
+PROGRAMS_DIR = os.environ.get('PROGRAMS_DIR')
 
 _WEB_SEARCH_COMPATIBLE_MODELS: frozenset[str] = frozenset({
     'claude-haiku-4-5-20251001',
@@ -36,7 +39,7 @@ _WEB_SEARCH_COMPATIBLE_MODELS: frozenset[str] = frozenset({
     'claude-opus-4-7',
 })
 
-app = FastAPI(title='crawler', version='0.2.0')
+app = FastAPI(title='docseek', version='0.2.0')
 
 
 class DiscoverRequest(BaseModel):
@@ -105,6 +108,14 @@ class DiscoverRequest(BaseModel):
         description=(
             'Hosts the jev layer may crawl besides the seed host, even without a link from it. '
             'Ignored when same_domain_only is true.'
+        ),
+    )
+    programs: bool = Field(
+        default=False,
+        description=(
+            "Answer from the site's generated discovery program when it is healthy, and crawl otherwise; after "
+            'a crawl a program is written in the background for next time. Needs PROGRAMS_DIR, and a coding '
+            'model (CODEGEN_MODEL) to write programs.'
         ),
     )
     include_rejected: bool = Field(
@@ -218,10 +229,72 @@ def _run_crawl(payload: DiscoverRequest, llm: LLMClient, on_event=None):
     )
 
 
+def _require_programs_dir() -> ProgramStore:
+    if not PROGRAMS_DIR:
+        raise HTTPException(status_code=404, detail='Generated programs not configured (PROGRAMS_DIR not set)')
+    return ProgramStore(PROGRAMS_DIR)
+
+
+def _program_judge(judge: str | None, profile: str) -> RelevanceJudge:
+    """The judge that scores a program's documents: a program needs one, there is no agent fallback."""
+    try:
+        return make_judge(judge, load_profile(profile))
+    except UnknownProfile as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except JudgeUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+_generating: set[str] = set()
+_generating_lock = Lock()
+
+
+def _start_generation(store: ProgramStore, url: str, goal: str, judge: str | None, profile: str) -> str:
+    """Write a program in the background: 'started', 'already_running', or 'no_model' when no coding model is
+    configured."""
+    try:
+        llm = codegen_llm()
+    except ValueError:
+        llm = None
+    if llm is None:
+        return 'no_model'
+    key = program_key(url, goal)
+    with _generating_lock:
+        if key in _generating:
+            return 'already_running'
+        _generating.add(key)
+
+    def work() -> None:
+        try:
+            program = generate_program(store, url, goal, llm=llm, judge=make_judge(judge, load_profile(profile)))
+            logger.info('[programs] %s: %s', key, 'written' if program else 'no program produced')
+        except Exception:  # noqa: BLE001 - a background job has no caller to raise to
+            logger.exception('[programs] generating %s failed', key)
+        finally:
+            with _generating_lock:
+                _generating.discard(key)
+    Thread(target=work, daemon=True).start()
+    return 'started'
+
+
+def _discover(payload: DiscoverRequest, llm: LLMClient, on_event=None):
+    """A crawl, or with `programs` the hybrid: the site's program when it is healthy, the crawl otherwise."""
+    if not payload.programs:
+        return _run_crawl(payload, llm, on_event)
+    store = _require_programs_dir()
+    result = hybrid_discover(payload.url, payload.goal, store=store,
+                             judge=_program_judge(payload.judge, payload.profile),
+                             crawl=lambda: _run_crawl(payload, llm, on_event), include_rejected=payload.include_rejected)
+    if result.program['path'] == 'crawl':
+        result.program['generation'] = _start_generation(store, payload.url, payload.goal, payload.judge,
+                                                         payload.profile)
+    return result
+
+
 @app.post('/v1/discover')
 def discover(payload: DiscoverRequest, x_api_key: str | None = Header(default=None)) -> dict:
     _require_api_key(x_api_key)
-    result = _run_crawl(payload, _agent_llm(payload))
+    result = _discover(payload, _agent_llm(payload))
     return result.model_dump()
 
 
@@ -269,6 +342,8 @@ def discover_stream(
 ) -> StreamingResponse:
     _require_api_key(x_api_key)
     llm = _agent_llm(payload)
+    if payload.programs:
+        _require_programs_dir()                   # fail before the stream starts, not inside it
 
     events: Queue[dict] = Queue()
     done_sentinel = object()
@@ -287,7 +362,7 @@ def discover_stream(
             logger.debug('[docseek] discover-stream config: %s', config_event)
             events.put(config_event)
 
-            result = _run_crawl(
+            result = _discover(
                 payload, llm,
                 on_event=lambda ev: None if ev.get('type') == 'page_elements' else events.put(ev),
             )
@@ -355,3 +430,76 @@ def delete_patterns(domain: str, x_api_key: str | None = Header(default=None)) -
     if not deleted:
         raise HTTPException(status_code=404, detail=f'No patterns found for domain: {domain}')
     return {'deleted': True, 'domain': domain}
+
+
+class GenerateRequest(BaseModel):
+    url: str
+    goal: str = Field(min_length=1, max_length=2000)
+    judge: Literal['jev', 'llm'] | None = None
+    profile: str = 'generic'
+
+
+class DriftRequest(BaseModel):
+    keys: list[str] = Field(default_factory=list, description='Programs to check; empty checks every program.')
+
+
+def _program_summary(key: str, meta: dict) -> dict:
+    fields = ('goal', 'start_url', 'generated', 'model', 'submitted', 'stale', 'last_run', 'last_reason', 'last_kept',
+              'failures')
+    return {'key': key, **{f: meta.get(f) for f in fields}}
+
+
+@app.get('/v1/programs')
+def list_programs(x_api_key: str | None = Header(default=None)) -> list[dict]:
+    _require_api_key(x_api_key)
+    store = _require_programs_dir()
+    return [_program_summary(key, store.load(key).meta) for key in store.keys()]
+
+
+@app.get('/v1/programs/{key}')
+def get_program(key: str, x_api_key: str | None = Header(default=None)) -> dict:
+    _require_api_key(x_api_key)
+    store = _require_programs_dir()
+    try:
+        program = store.load(key)
+    except KeyError:
+        program = None
+    if program is None:
+        raise HTTPException(status_code=404, detail=f'No program: {key}')
+    return {'key': key, 'code': program.code, 'meta': program.meta}
+
+
+@app.delete('/v1/programs/{key}')
+def delete_program(key: str, x_api_key: str | None = Header(default=None)) -> dict:
+    _require_api_key(x_api_key)
+    store = _require_programs_dir()
+    try:
+        deleted = store.delete(key)
+    except KeyError:
+        deleted = False
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f'No program: {key}')
+    return {'deleted': True, 'key': key}
+
+
+@app.post('/v1/programs', status_code=202)
+def create_program(payload: GenerateRequest, x_api_key: str | None = Header(default=None)) -> dict:
+    """Write (or rewrite) the program for a site and goal in the background; poll GET /v1/programs/{key}."""
+    _require_api_key(x_api_key)
+    store = _require_programs_dir()
+    _program_judge(payload.judge, payload.profile)            # the judge must be able to run before we start
+    generation = _start_generation(store, payload.url, payload.goal, payload.judge, payload.profile)
+    if generation == 'no_model':
+        raise HTTPException(status_code=503, detail='No coding model configured: set CODEGEN_MODEL (or LLM_MODEL)')
+    return {'key': program_key(payload.url, payload.goal), 'generation': generation}
+
+
+@app.post('/v1/programs/check')
+def check_programs(payload: DriftRequest, x_api_key: str | None = Header(default=None)) -> list[dict]:
+    """Replay programs and compare them with their snapshots (no model). A program without a snapshot gets one."""
+    _require_api_key(x_api_key)
+    store = _require_programs_dir()
+    try:
+        return check_drift(store, payload.keys or None)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

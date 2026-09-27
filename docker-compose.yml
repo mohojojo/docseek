@@ -16,5 +16,7 @@ services:
       # set it to require an X-API-Key header on every request; unset, the API is open
       CRAWLER_API_KEY: ${CRAWLER_API_KEY:-}
       PATTERNS_DIR: /app/data/patterns
+      # PROGRAMS_DIR: /app/data/programs   # generated discovery programs: off unless set (see README)
+      # CODEGEN_MODEL: claude-sonnet-5
     volumes:
       - ./data/patterns:/app/data/patterns

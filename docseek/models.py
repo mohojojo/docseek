@@ -62,7 +62,7 @@ class AgenticDownload(BaseModel):
     source_page: str
     relevance: float | None = None
     verdict: Literal['accepted', 'unsure', 'rejected', 'unscored'] = 'unscored'
-    source: Literal['page', 'sitemap', 'api', 'agent'] = 'agent'
+    source: Literal['page', 'sitemap', 'api', 'agent', 'program'] = 'agent'
     period: str | None = None
     year: str | None = None      # the year of the document's dated line, read by code, a Facet
 
@@ -99,6 +99,8 @@ class AgenticCrawlResult(BaseModel):
     stop_reason: str | None = None
     # URLs refused and page text flagged while crawling (never acted on, only counted)
     guard_counts: dict[str, int] = Field(default_factory=dict)
+    # with generated programs on: which path answered and why (docseek.codegen.programs)
+    program: dict | None = None
 
 
 class SearchSiteResult(BaseModel):

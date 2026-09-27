@@ -17,3 +17,6 @@ eval/reports/
 eval/snapshots/
 eval/ground_truth/*.json
 !eval/ground_truth/example.json
+
+# generated programs from eval runs
+eval/programs/

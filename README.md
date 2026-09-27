@@ -81,6 +81,35 @@ The client adapts to what a server accepts (for example OpenAI's reasoning model
 `max_completion_tokens` and no `temperature`). The browsing agent needs a model with tool calling;
 screenshots need a vision-capable model.
 
+## Generated programs
+
+For a site you query again and again, docseek can write a **discovery program**: a coding agent explores the site
+once - raw HTML, rendered pages, the JSON calls a page makes - and writes a small Python function that finds the
+documents the goal asks for. Later requests run the program with no model at all, in seconds, and the relevance
+judge scores what it returns exactly as it scores a crawl.
+
+```bash
+export PROGRAMS_DIR=./programs CODEGEN_MODEL=claude-sonnet-5
+docseek generate https://www.example.com/ "Find the 2025 annual reports (PDF)"   # a few minutes, once
+docseek https://www.example.com/ "Find the 2025 annual reports (PDF)" --programs  # seconds, no model
+docseek check                                                                      # has any site changed?
+```
+
+With `"programs": true`, `/v1/discover` answers from the site's program when it is **healthy**, and crawls
+otherwise: when the program errors, returns nothing where it used to find documents, or keeps fewer than half of
+what it kept last time, it is marked stale, the crawl answers, and a new program is written in the background.
+`docseek check` (or `POST /v1/programs/check`) replays every program against a snapshot of what it returned
+before - no model, no judge - and reports `ok`, `grew`, `shrank` or `broken`.
+
+What a program can do is fenced in: it runs in a separate process with an empty environment, CPU and memory
+limits, an allowlist of standard-library modules, and no network except the parent's fetcher - the site and its
+subdomains, the data hosts and POST endpoints the site's own pages used while the program was written,
+robots.txt, and the same public-address rule as the crawl. **This is a boundary, not a hardened jail**: the code
+was written by a model that read untrusted page text, so the feature is off unless `PROGRAMS_DIR` is set, and a
+docseek that strangers can reach belongs in a container.
+
+Health cannot tell when a program confidently returns the wrong slice of a site; a crawl or a person can.
+
 ## Configuration
 
 | Variable | Description |
@@ -93,6 +122,9 @@ screenshots need a vision-capable model.
 | `TYPESAFE_API_KEY` | Enables the `jev` judge (the default judge when set). |
 | `JEV_PRICE_PER_MTOK` | Your TypeSafe price per million input tokens, used only for the cost the result reports (`jev_cost_usd`). Default 0. |
 | `CRAWLER_API_KEY` | When set, every request must send it as `X-API-Key`. Unset, the API is open - set it before exposing the service. |
+| `PROGRAMS_DIR` | Directory for generated discovery programs. Unset: the feature is off. |
+| `CODEGEN_MODEL` | Model that writes programs, on the configured provider (default: `LLM_MODEL`). Use a strong coding model. |
+| `CODEGEN_MAX_TURNS`, `CODEGEN_MAX_INPUT_TOKENS` | Budget for writing one program (default 45 turns, 3M input tokens including cached reads). |
 | `PATTERNS_DIR` | Directory where learned site knowledge (gate sequences, replayable escalation steps) is kept. Unset: nothing is learned. |
 
 ## HTTP API
@@ -104,6 +136,9 @@ screenshots need a vision-capable model.
 | `GET /v1/profiles` | The bundled domain profiles. |
 | `POST /v1/search-sites` | Suggest websites for a goal (Anthropic web search). |
 | `GET/DELETE /v1/patterns[/{domain}]` | Learned site knowledge. |
+| `POST /v1/programs` | Write (or rewrite) a site's discovery program in the background. |
+| `GET/DELETE /v1/programs[/{key}]` | Generated programs: code, notes, health. |
+| `POST /v1/programs/check` | Replay programs against their snapshots (drift check). |
 | `GET /health` | Liveness. |
 
 Main request fields for `/v1/discover`:
@@ -116,6 +151,7 @@ Main request fields for `/v1/discover`:
 | `profile` | `generic` | Domain profile name, or a path to a profile file. |
 | `max_pages`, `max_seconds`, `max_depth` | 10, 180, 3 | Crawl budget. |
 | `same_domain_only`, `allowed_hosts` | `true`, `[]` | Off-domain policy: with `same_domain_only: false` the crawl may cross to one host linked from the start site. |
+| `programs` | `false` | Answer from the site's generated program when it is healthy (needs `PROGRAMS_DIR`). |
 | `include_rejected` | `false` | Also return rejected candidates, to see what the judge threw away. |
 | `model` | `LLM_MODEL` | Agent model override. |
 
@@ -137,8 +173,8 @@ The result lists the documents with `relevance`, `verdict`, `source` (page, site
 
 `eval/` measures recall and precision against hand-checked ground truth: see
 [`eval/ground_truth/README.md`](eval/ground_truth/README.md) for the format and the scripts
-(`run_jev.py` for the judge-driven crawl, `run_baseline.py` for the agent path, `judge_compare.py` for
-scoring a judge offline on a frozen, labelled candidate set).
+(`run_jev.py` for the judge-driven crawl, `run_baseline.py` for the agent path, `run_codegen.py` for generated
+programs, `judge_compare.py` for scoring a judge offline on a frozen, labelled candidate set).
 
 ## Development
 
