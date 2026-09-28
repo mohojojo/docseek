@@ -39,6 +39,7 @@ from .json_mining import MAX_JSON_BYTES, candidates_from_json
 from .judge import RelevanceJudge, make_judge, verdict_for
 from .llm import LLMClient
 from .models import AgenticCrawlResult, AgenticDownload
+from .proxy import http_proxy, launch_browser
 from .reach import OffDomainPolicy, bare_host, is_crawlable  # noqa: F401 - re-exported
 from .recipes import RecipeStore, recipe_from_steps, replay as replay_recipe
 from .series import date_of, period_of  # noqa: F401 - re-exported: the period Facet is read by docseek.series
@@ -534,7 +535,7 @@ def jev_crawl(
 
     try:
         final_url = str(httpx.get(start_url, headers={'User-Agent': user_agent}, follow_redirects=True,
-                                  timeout=15).url)
+                                  timeout=15, proxy=http_proxy()).url)
     except httpx.HTTPError:
         final_url = start_url
     seed = {'host': urlparse(final_url).netloc, 'resolved': False}
@@ -702,8 +703,7 @@ def jev_crawl(
     def session():
         if not hasattr(local, 'page'):
             local.playwright = sync_playwright().start()
-            local.browser = local.playwright.chromium.launch(
-                headless=headless, args=['--no-sandbox', '--disable-setuid-sandbox'] if headless else [])
+            local.browser = launch_browser(local.playwright, headless)
             local.context = local.browser.new_context(user_agent=user_agent, accept_downloads=True)
             local.inflight = set()
             local.json_bodies = []        # first-party JSON the current page fetched for itself

@@ -20,6 +20,7 @@ from .reach import is_safe_url as _is_safe_url, robots_allows as _url_allowed_by
 from .llm import DEFAULT_ANTHROPIC_MODEL, AnthropicLLM, LLMClient, make_llm
 from .models import AgentStep, AgenticCrawlResult, AgenticDownload, CrawlPlan, FullElement, SearchSiteResult
 from .patterns import DomainPatterns, PatternStore
+from .proxy import http_proxy, urlopen as proxied_urlopen
 from .query import _BINARY_EXTENSIONS
 from .scraper import _DEFAULT_USER_AGENT
 
@@ -783,7 +784,7 @@ def _fetch_llms_txt(base: str, timeout: int) -> list[str]:
     """Fetch /llms.txt and extract any URLs it lists (Markdown links or bare URLs)."""
     try:
         req = urllib.request.Request(f'{base}/llms.txt', headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with proxied_urlopen(req, timeout=timeout) as r:
             text = r.read().decode('utf-8', errors='replace')
         urls: list[str] = []
         for m in re.finditer(r'\[.*?\]\((https?://[^)\s]+)\)', text):
@@ -824,7 +825,8 @@ def _fast_harvest(
     """
     try:
         import httpx
-        resp = httpx.get(url, headers={'User-Agent': user_agent}, follow_redirects=True, timeout=10.0)
+        resp = httpx.get(url, headers={'User-Agent': user_agent}, follow_redirects=True, timeout=10.0,
+                         proxy=http_proxy())
     except Exception:
         return _FastHarvestResult([], [], True)
 
@@ -920,7 +922,7 @@ def _fetch_and_parse_sitemap(url: str, timeout: int) -> tuple[list[str], list[st
     """Fetch a single sitemap URL. Returns (page_urls, child_sitemap_urls)."""
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with proxied_urlopen(req, timeout=timeout) as r:
             xml_text = r.read().decode('utf-8', errors='replace')
         return _parse_sitemap_xml(xml_text)
     except Exception as exc:
@@ -940,7 +942,7 @@ def fetch_sitemap(seed_url: str, timeout: int = 5) -> list[str]:
 
     try:
         req = urllib.request.Request(f'{base}/robots.txt', headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with proxied_urlopen(req, timeout=timeout) as r:
             robots_lines = r.read().decode('utf-8', errors='replace').splitlines()
         for line in robots_lines:
             if line.lower().startswith('sitemap:'):

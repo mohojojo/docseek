@@ -15,6 +15,12 @@ services:
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
       # set it to require an X-API-Key header on every request; unset, the API is open
       CRAWLER_API_KEY: ${CRAWLER_API_KEY:-}
+      # route the crawl's traffic to sites through a proxy (model calls stay direct)
+      PROXY_SERVER: ${PROXY_SERVER:-}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+      # crawl with a remote browser instead of the local Chromium (wss://..., any CDP provider)
+      BROWSER_CDP_URL: ${BROWSER_CDP_URL:-}
       PATTERNS_DIR: /app/data/patterns
       # PROGRAMS_DIR: /app/data/programs   # generated discovery programs: off unless set (see README)
       # CODEGEN_MODEL: claude-sonnet-5

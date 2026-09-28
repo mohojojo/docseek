@@ -178,6 +178,9 @@ Health cannot tell when a program confidently returns the wrong slice of a site;
 | `CODEGEN_RETRY_HOURS` | Least time between automatic regenerations of one site's program (default 24). |
 | `CODEGEN_MAX_TURNS`, `CODEGEN_MAX_INPUT_TOKENS` | Budget for writing one program (default 45 turns, 3M input tokens including cached reads). |
 | `PATTERNS_DIR` | Directory where learned site knowledge (gate sequences, replayable escalation steps) is kept. Unset: nothing is learned. |
+| `PROXY_SERVER` | Send the crawl's traffic to the site (browser, HTTP fetches, probes, robots.txt, sitemaps) through this proxy, e.g. `http://pr.example.com:7777`. Model provider calls do not use it. Unset: direct. |
+| `PROXY_USERNAME`, `PROXY_PASSWORD` | Credentials for `PROXY_SERVER`, if it needs them. Providers that pick the exit country from the username work as they are. |
+| `BROWSER_CDP_URL` | `wss://...` of a remote browser (Oxylabs Headless Browser, Browserless, Browserbase, ...) to crawl with instead of a local Chromium - for sites that need CAPTCHA solving or a residential fingerprint. `PROXY_SERVER` does not apply to it; the plain HTTP fetches still use the proxy. |
 
 ## HTTP API
 

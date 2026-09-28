@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from playwright.sync_api import sync_playwright
 
 from .models import ANode, ElementRegistry, FullElement
+from .proxy import launch_browser
 
 logger = logging.getLogger(__name__)
 
@@ -924,10 +925,8 @@ def open_page(
     Pass storage_state (from context.storage_state()) to restore cookies/localStorage
     from a previous visit so sites don't re-show cookie banners or filter forms.
     """
-    # --no-sandbox / --disable-setuid-sandbox are Linux/Docker flags; skip in headed mode.
-    launch_args = ['--no-sandbox', '--disable-setuid-sandbox'] if headless else []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless, args=launch_args)
+        browser = launch_browser(p, headless)
         ctx = browser.new_context(
             user_agent=user_agent,
             accept_downloads=accept_downloads,
@@ -1070,9 +1069,8 @@ def fetch_and_build_tree(
     Set expand_selects=True to trigger each <select> option and collect revealed links.
     Set headless=False to watch the browser visually (useful for debugging).
     """
-    launch_args = ['--no-sandbox', '--disable-setuid-sandbox'] if headless else []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless, args=launch_args)
+        browser = launch_browser(p, headless)
         page = browser.new_page(user_agent=user_agent)
         if headless:
             page.route('**/*', _make_cross_origin_script_blocker(url))

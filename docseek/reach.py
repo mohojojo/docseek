@@ -20,6 +20,8 @@ import urllib.robotparser
 from functools import lru_cache
 from urllib.parse import urlparse
 
+from .proxy import urlopen as proxied_urlopen
+
 logger = logging.getLogger(__name__)
 
 ROBOTS_TIMEOUT_S = 5
@@ -102,7 +104,7 @@ def _load_robots(scheme: str, netloc: str) -> urllib.robotparser.RobotFileParser
         return None
     try:
         request = urllib.request.Request(url, headers={'User-Agent': _ROBOTS_USER_AGENT})
-        with urllib.request.urlopen(request, timeout=ROBOTS_TIMEOUT_S) as response:
+        with proxied_urlopen(request, timeout=ROBOTS_TIMEOUT_S) as response:
             lines = response.read().decode('utf-8', errors='replace').splitlines()
     except Exception as exc:  # noqa: BLE001 - no readable robots.txt means no rules
         logger.debug('robots.txt unavailable for %s: %s', netloc, exc)

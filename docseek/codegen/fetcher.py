@@ -17,7 +17,8 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..jev_crawl import _HARVEST_JS
+from ..jev_crawl import _HARVEST_JS, BLOCKED_RESOURCES
+from ..proxy import http_proxy, launch_browser
 from ..reach import bare_host, is_safe_url, robots_allows
 from ..scraper import _DEFAULT_USER_AGENT, _try_accept_cookies
 from .sandbox import FetchRefused
@@ -61,7 +62,8 @@ class Fetcher:
         self.max_requests, self.max_renders = max_requests, max_renders
         self.requests = self.renders = 0
         self.user_agent = user_agent
-        self._client = httpx.Client(headers={'User-Agent': user_agent}, follow_redirects=True, timeout=30)
+        self._client = httpx.Client(headers={'User-Agent': user_agent}, follow_redirects=True, timeout=30,
+                                    proxy=http_proxy())
         self._last = 0.0
         self._lock = threading.Lock()
         self._pw = self._browser = None
@@ -137,8 +139,12 @@ class Fetcher:
         if self._browser is None:
             from playwright.sync_api import sync_playwright
             self._pw = sync_playwright().start()
-            self._browser = self._pw.chromium.launch()
-        return self._browser.new_page(user_agent=self.user_agent)
+            self._browser = launch_browser(self._pw)
+        page = self._browser.new_page(user_agent=self.user_agent)
+        # images, media and fonts carry no links or data; skipping them is most of a proxy's per-GB bill
+        page.route('**/*', lambda route, request: route.abort() if request.resource_type in BLOCKED_RESOURCES
+                   else route.continue_())
+        return page
 
     def render(self, url: str) -> dict:
         """{url, status, html, links, requests}: the page after its scripts ran, the crawler's harvest of its links,

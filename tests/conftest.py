@@ -12,3 +12,10 @@ def _offline_reach(monkeypatch):
     reach._robots_cache.clear()
     yield
     reach._robots_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_proxy(monkeypatch):
+    """A developer's proxy or remote browser settings must not send test traffic anywhere."""
+    for name in ('PROXY_SERVER', 'PROXY_USERNAME', 'PROXY_PASSWORD', 'BROWSER_CDP_URL'):
+        monkeypatch.delenv(name, raising=False)

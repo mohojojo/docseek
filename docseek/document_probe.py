@@ -22,6 +22,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .proxy import http_proxy
+
 logger = logging.getLogger(__name__)
 
 MAX_PROBES_PER_PAGE = 8
@@ -44,7 +46,7 @@ def is_document_response(content_type: str, content_disposition: str = '') -> bo
 class DocumentProbe:
     def __init__(self, user_agent: str, may_probe: Callable[[str], bool]):
         self._client = httpx.Client(headers={'User-Agent': user_agent}, follow_redirects=True,
-                                    timeout=PROBE_TIMEOUT_S)
+                                    timeout=PROBE_TIMEOUT_S, proxy=http_proxy())
         self._may_probe = may_probe
         self._lock = threading.Lock()
         self.probes = 0
