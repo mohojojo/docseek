@@ -52,7 +52,9 @@ The program:
   the site links them (years and categories change).
 - selects by the site's own structure (which listing, tab, column, section, category) so that look-alike
   documents of other types, periods or languages the goal does not ask for are left out. When unsure whether a
-  document qualifies, include it with honest context: a relevance judge scores every document you return.
+  document qualifies, include it with honest context: a relevance judge scores every document you return. A goal
+  naming years or a range of years also covers fiscal, academic or reporting years that overlap it: for
+  "2021 to 2025", a report for 2020/21 and one for 2025/26 both overlap and belong in.
 - catches errors per page, so one broken page does not lose the rest.
 
 Work like an engineer: find where the documents live, check the raw HTML (and any JSON the page loads), then
