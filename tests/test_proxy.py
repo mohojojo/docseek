@@ -90,3 +90,60 @@ def test_browser_cdp_url_connects_to_the_remote_browser_instead(monkeypatch):
     pw = FakePlaywright()
     assert proxy.launch_browser(pw, headless=False) == 'remote'
     assert pw.chromium.calls == [('connect_over_cdp', 'wss://user:pass@hb.example?p_cc=DE')]
+
+
+class FakeContext:
+    def __init__(self, **options):
+        self.options, self.cookies, self.closed = options, [], False
+
+    def add_cookies(self, cookies):
+        self.cookies += cookies
+
+    def new_page(self):
+        return ('page in', self)
+
+    def close(self):
+        self.closed = True
+
+
+class FakeBrowser:
+    def __init__(self, contexts=()):
+        self.contexts = list(contexts)
+        self.made = []
+
+    def new_context(self, **options):
+        context = FakeContext(**options)
+        self.made.append(context)
+        return context
+
+    def new_page(self, **options):
+        return ('own page', options)
+
+
+def test_locally_a_new_context_with_our_options():
+    browser = FakeBrowser()
+    context = proxy.browser_context(browser, user_agent='docseek', accept_downloads=True)
+    assert context.options == {'user_agent': 'docseek', 'accept_downloads': True}
+    assert proxy.new_page(browser, 'docseek') == ('own page', {'user_agent': 'docseek'})
+    proxy.close_context(context)
+    assert context.closed
+
+
+def test_a_remote_browser_crawls_in_its_default_context_with_its_own_user_agent(monkeypatch):
+    # the service's fingerprint, stealth and CAPTCHA solving live in the default context
+    monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
+    default = FakeContext()
+    browser = FakeBrowser([default])
+    cookies = [{'name': 'consent', 'value': '1', 'url': 'https://site.example'}]
+    context = proxy.browser_context(browser, user_agent='docseek', storage_state={'cookies': cookies})
+    assert context is default and not browser.made
+    assert default.cookies == cookies                       # a remembered cookie banner stays dismissed
+    assert proxy.new_page(browser, 'docseek') == ('page in', default)
+    proxy.close_context(context)
+    assert not default.closed                                # the service ends the session on disconnect
+
+
+def test_a_remote_browser_without_a_context_gets_a_plain_one(monkeypatch):
+    monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
+    browser = FakeBrowser()
+    assert proxy.browser_context(browser, user_agent='docseek').options == {}

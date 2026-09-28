@@ -182,6 +182,21 @@ Health cannot tell when a program confidently returns the wrong slice of a site;
 | `PROXY_USERNAME`, `PROXY_PASSWORD` | Credentials for `PROXY_SERVER`, if it needs them. Providers that pick the exit country from the username work as they are. |
 | `BROWSER_CDP_URL` | `wss://...` of a remote browser (Oxylabs Headless Browser, Browserless, Browserbase, ...) to crawl with instead of a local Chromium - for sites that need CAPTCHA solving or a residential fingerprint. `PROXY_SERVER` does not apply to it; the plain HTTP fetches still use the proxy. |
 
+### Proxies and remote browsers
+
+Both are optional; without them a crawl runs from the host with a local Chromium.
+
+- **`PROXY_SERVER`** takes any ordinary HTTP(S) proxy, residential ones included. Put a provider's country or
+  sticky-session options in `PROXY_USERNAME` as it documents them. Prefer a sticky session: a site that ties
+  cookies or a filter form to one visitor breaks when every request leaves from a new IP. Proxy modes that
+  re-sign TLS with the provider's own certificate (Zyte and Bright Data proxy modes without KYC, ScrapingBee,
+  ScraperAPI) do not work: docseek keeps certificate verification on.
+- **`BROWSER_CDP_URL`** takes one static `wss://` address, and each crawl thread connects to it. On a remote
+  browser the crawl works in the browser's default context and leaves the user agent to the service, which is
+  where services apply their fingerprint and CAPTCHA solving. Services that hand out one URL per session
+  through their own API (Browserbase, Steel, Hyperbrowser) need a fresh URL per crawl; a service that limits a
+  session to one domain (Bright Data's Browser API) cannot follow a crawl onto a second host.
+
 ## HTTP API
 
 | Endpoint | |

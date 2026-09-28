@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from playwright.sync_api import sync_playwright
 
 from .models import ANode, ElementRegistry, FullElement
-from .proxy import launch_browser
+from .proxy import browser_context, close_context, launch_browser, new_page
 
 logger = logging.getLogger(__name__)
 
@@ -927,7 +927,8 @@ def open_page(
     """
     with sync_playwright() as p:
         browser = launch_browser(p, headless)
-        ctx = browser.new_context(
+        ctx = browser_context(
+            browser,
             user_agent=user_agent,
             accept_downloads=accept_downloads,
             storage_state=storage_state,
@@ -940,7 +941,7 @@ def open_page(
         try:
             yield page
         finally:
-            ctx.close()
+            close_context(ctx)
 
 
 def extract_tree_from_page(
@@ -1071,7 +1072,7 @@ def fetch_and_build_tree(
     """
     with sync_playwright() as p:
         browser = launch_browser(p, headless)
-        page = browser.new_page(user_agent=user_agent)
+        page = new_page(browser, user_agent)
         if headless:
             page.route('**/*', _make_cross_origin_script_blocker(url))
         page.goto(url, wait_until=wait_until, timeout=timeout)

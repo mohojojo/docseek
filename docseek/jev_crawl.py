@@ -39,7 +39,7 @@ from .json_mining import MAX_JSON_BYTES, candidates_from_json
 from .judge import RelevanceJudge, make_judge, verdict_for
 from .llm import LLMClient
 from .models import AgenticCrawlResult, AgenticDownload
-from .proxy import http_proxy, launch_browser
+from .proxy import browser_context, close_context, http_proxy, launch_browser
 from .reach import OffDomainPolicy, bare_host, is_crawlable  # noqa: F401 - re-exported
 from .recipes import RecipeStore, recipe_from_steps, replay as replay_recipe
 from .series import date_of, period_of  # noqa: F401 - re-exported: the period Facet is read by docseek.series
@@ -704,7 +704,7 @@ def jev_crawl(
         if not hasattr(local, 'page'):
             local.playwright = sync_playwright().start()
             local.browser = launch_browser(local.playwright, headless)
-            local.context = local.browser.new_context(user_agent=user_agent, accept_downloads=True)
+            local.context = browser_context(local.browser, user_agent=user_agent, accept_downloads=True)
             local.inflight = set()
             local.json_bodies = []        # first-party JSON the current page fetched for itself
 
@@ -1088,7 +1088,7 @@ def jev_crawl(
         def close(_):
             barrier.wait(timeout=30)
             if hasattr(local, 'page'):
-                local.context.close()
+                close_context(local.context)
                 local.browser.close()
                 local.playwright.stop()
 

@@ -63,11 +63,45 @@ def urlopen(request: urllib.request.Request, timeout: float):
     return opener.open(request, timeout=timeout)
 
 
+def _cdp_url() -> str:
+    return (os.getenv('BROWSER_CDP_URL') or '').strip()
+
+
 def launch_browser(playwright, headless: bool = True):
     """The crawl's browser: the remote one at BROWSER_CDP_URL, or a local Chromium through the proxy."""
-    cdp_url = (os.getenv('BROWSER_CDP_URL') or '').strip()
+    cdp_url = _cdp_url()
     if cdp_url:
         return playwright.chromium.connect_over_cdp(cdp_url)
     # --no-sandbox / --disable-setuid-sandbox are Linux/Docker flags; skip in headed mode.
     args = ['--no-sandbox', '--disable-setuid-sandbox'] if headless else []
     return playwright.chromium.launch(headless=headless, args=args, proxy=browser_proxy())
+
+
+# Remote browser services apply their fingerprint, stealth and CAPTCHA solving to the browser's default context,
+# and ask that the user agent be left to them (Browserbase, Steel, Hyperbrowser, Browserless). A new context with
+# our own user agent would crawl without what the service is paid for.
+
+def browser_context(browser, **options):
+    """A context to crawl in: a new one with `options` locally, the remote browser's default context otherwise.
+    There only storage_state's cookies are carried over; downloads are accepted by default either way."""
+    if not _cdp_url():
+        return browser.new_context(**options)
+    context = browser.contexts[0] if browser.contexts else browser.new_context()
+    cookies = (options.get('storage_state') or {}).get('cookies')
+    if cookies:
+        context.add_cookies(cookies)
+    return context
+
+
+def new_page(browser, user_agent: str):
+    """A page with our user agent locally; on a remote browser, a page in its default context."""
+    if not _cdp_url():
+        return browser.new_page(user_agent=user_agent)
+    return browser_context(browser).new_page()
+
+
+def close_context(context) -> None:
+    """Close a context we made. A remote browser's default context is left to the service, which ends the session
+    when we disconnect; closing it could take another crawl's pages on a shared session with it."""
+    if not _cdp_url():
+        context.close()
