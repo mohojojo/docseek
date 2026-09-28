@@ -231,6 +231,9 @@ pytest
 The tests run offline: DNS resolution and robots.txt are faked (`tests/conftest.py`) and every model call is
 mocked. Browser tests use a local Chromium and are skipped when it is missing.
 
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues privately - see
+[SECURITY.md](SECURITY.md).
+
 ## Licence
 
 Apache-2.0 - see [LICENSE](LICENSE). TypeSafe Jev is a third-party service with its own terms; its API client

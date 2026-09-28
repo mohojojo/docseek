@@ -1,0 +1,24 @@
+name: Bug
+description: Something fails, crashes or behaves differently from the documentation.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: The request or command, and any traceback. Leave out API keys.
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Version and environment
+      placeholder: docseek 0.3.0, Python 3.12, macOS, LLM_PROVIDER=openai-compatible
+    validations:
+      required: true

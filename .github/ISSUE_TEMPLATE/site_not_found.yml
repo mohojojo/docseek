@@ -1,0 +1,37 @@
+name: A site where docseek misses documents
+description: docseek did not find documents a goal asks for, or returned ones it should not have.
+labels: [discovery]
+body:
+  - type: input
+    id: url
+    attributes:
+      label: Start URL
+      placeholder: https://www.example.com/investors
+    validations:
+      required: true
+  - type: input
+    id: goal
+    attributes:
+      label: Goal
+      placeholder: Find the 2025 annual reports (PDF)
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What it should have found
+      description: A few of the documents it missed (or should not have returned), with their URLs.
+    validations:
+      required: true
+  - type: textarea
+    id: got
+    attributes:
+      label: What it returned
+      description: The relevant part of the result - `stop_reason`, and the documents with their `verdict`.
+  - type: input
+    id: setup
+    attributes:
+      label: Version, judge and model
+      placeholder: docseek 0.3.0, judge llm, gpt-4.1-mini, profile generic
+    validations:
+      required: true
