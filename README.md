@@ -75,6 +75,8 @@ Or from the command line (the same crawl, printed as JSON):
 docseek https://www.example.com/ "Find the 2025 annual reports (PDF)" --max-pages 30
 ```
 
+Add `--format csv` for one row per document (URL, name, verdict, relevance and the facets) instead of the full JSON result.
+
 ### Any model
 
 ```bash

@@ -1,6 +1,6 @@
 """Command line.
 
-  docseek URL GOAL [options]        the same crawl as POST /v1/discover, printed as JSON
+  docseek URL GOAL [options]        the same crawl as POST /v1/discover, printed as JSON (or CSV with --format csv)
   docseek generate URL GOAL         write the site's discovery program (needs PROGRAMS_DIR and a coding model)
   docseek check [KEY ...]           replay programs and compare them with their snapshots (no model)
 
@@ -9,6 +9,7 @@ Progress goes to stderr.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sys
@@ -24,6 +25,16 @@ def _judge_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--profile', default='generic', help='Domain profile name or path (default: generic)')
     parser.add_argument('--judge', choices=('jev', 'llm'), default=None,
                         help='Relevance judge (default: jev when TYPESAFE_API_KEY is set, else llm)')
+
+
+def write_csv(downloads: list, out) -> None:
+    """One row per document, one column per field of AgenticDownload, in its order."""
+    from .models import AgenticDownload
+
+    writer = csv.DictWriter(out, fieldnames=list(AgenticDownload.model_fields), lineterminator='\n')
+    writer.writeheader()
+    for download in downloads:
+        writer.writerow(download.model_dump())
 
 
 def _fail(message: str) -> None:
@@ -45,6 +56,8 @@ def _discover(argv: list[str]) -> None:
     parser.add_argument('--max-depth', type=int, default=3)
     parser.add_argument('--include-rejected', action='store_true', help='Also print rejected candidates')
     parser.add_argument('--latest', action='store_true', help='Keep only the newest document of each series')
+    parser.add_argument('--format', choices=('json', 'csv'), default='json',
+                        help='json: the whole result; csv: one row per document (default: json)')
     parser.add_argument('--programs', action='store_true',
                         help="Answer from the site's generated program when it is healthy; after a crawl, write one")
     _programs_dir_arg(parser)
@@ -71,7 +84,10 @@ def _discover(argv: list[str]) -> None:
         result = server._discover(payload, server._agent_llm(payload), on_event=on_event)
     except HTTPException as exc:
         _fail(exc.detail)
-    print(json.dumps(result.model_dump(), indent=2, ensure_ascii=False))
+    if args.format == 'csv':
+        write_csv(result.downloads, sys.stdout)
+    else:
+        print(json.dumps(result.model_dump(), indent=2, ensure_ascii=False))
     if (result.program or {}).get('generation') == 'started':
         print('docseek: writing a program for next time (this takes a few minutes)...', file=sys.stderr)
         while server._generating:
