@@ -279,3 +279,69 @@ def test_both_judges_answer_the_group_question():
     assert jev.edition_group('g', docs) == (0.92, 1, 0.97)
     jev.ask = lambda state, questions: None
     assert jev.edition_group('g', docs) == (None, None, None)
+
+
+class TestSiteDates:
+    @pytest.mark.parametrize('text, date', [
+        ('2026-03-12 Factsheet', '2026-03-12'),
+        ('Beschluss vom 12.03.2026', '2026-03-12'),
+        ('2026. 03. 12. közzétéve', '2026-03-12'),
+        ('Közzétéve: 2026. március 12.', '2026-03-12'),
+        ('Published 12 March 2026', '2026-03-12'),
+        ('Veröffentlicht am 12. März 2026', '2026-03-12'),
+        ('publié le 12 mars 2026', '2026-03-12'),
+        ('publicado el 12 de marzo de 2026', '2026-03-12'),
+        ('Published March 12, 2026', '2026-03-12'),
+        ("Entschließung vom 12.12.2025 (Jahr 2025), gelistet unter 'Entschließungen'", '2025-12-12'),
+    ])
+    def test_dates_with_one_meaning_are_read(self, text, date):
+        from docseek.series import date_of
+        assert date_of(text) == date
+
+    @pytest.mark.parametrize('text', [
+        '03/12/2026',                    # 3 December or 12 March: depends on the country
+        'factsheet-2026-03.pdf',         # a period, not a day
+        'HAT-450-7/2026. (HAT-15402/2025.)',
+        '31.02.2026',                    # no such day
+        'Market update 2026',
+    ])
+    def test_ambiguous_or_impossible_dates_are_not(self, text):
+        from docseek.series import date_of
+        assert date_of(text) is None
+
+    def test_the_first_date_in_the_row_is_the_documents(self):
+        from docseek.series import date_of
+        assert date_of('Published 12.03.2026, amended 01.06.2026') == '2026-03-12'
+
+
+class TestPublishedOrdering:
+    def test_an_overwritten_file_name_is_ordered_by_the_dates_the_site_shows(self):
+        docs = [doc('https://s.example/a/factsheet.pdf'), doc('https://s.example/b/factsheet.pdf')]
+        docs[0].published, docs[1].published = '2026-02-28', '2026-03-31'
+        assert [d.url for d in mark_latest(docs)] == ['https://s.example/a/factsheet.pdf']
+
+    def test_without_a_date_on_every_one_they_are_all_kept(self):
+        docs = [doc('https://s.example/a/factsheet.pdf'), doc('https://s.example/b/factsheet.pdf')]
+        docs[0].published = '2026-02-28'
+        assert mark_latest(docs) == [] and [d.latest_in_series for d in docs] == [None, None]
+
+    def test_names_that_order_cleanly_are_not_overruled_by_dates(self):
+        docs = [doc('https://s.example/fund-a-2026-02.pdf'), doc('https://s.example/fund-a-2026-03.pdf')]
+        docs[0].published, docs[1].published = '2026-04-01', '2026-03-01'   # a re-upload of the older one
+        mark_latest(docs)
+        assert [d.latest_in_series for d in docs] == [False, True]
+
+    def test_the_judge_sees_the_dates_shown_on_the_site(self):
+        from docseek.series import refine_latest
+        docs = [doc(f'https://s.example/ALAP-LAP_START-{n}.pdf') for n in (2407, 2408)]
+        docs[0].published, docs[1].published = '2024-08-05', '2024-09-04'
+        mark_latest(docs)
+
+        class Seeing(FakeEditionJudge):
+            def edition_group(self, goal, documents):
+                self.seen = documents
+                return None, None, None
+        judge = Seeing({})
+        refine_latest(docs, 'g', judge)
+        from docseek.judge import document_states
+        assert [s['date_shown_on_site'] for s in document_states(judge.seen)] == ['2024-08-05', '2024-09-04']

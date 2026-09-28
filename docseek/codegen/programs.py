@@ -31,7 +31,7 @@ from ..jev_crawl import year_of
 from ..judge import RelevanceJudge, verdict_for
 from ..models import AgenticCrawlResult, AgenticDownload
 from ..reach import bare_host
-from ..series import period_of
+from ..series import date_of, period_of
 from .fetcher import Fetcher
 from .sandbox import run_program
 
@@ -140,7 +140,8 @@ def judge_documents(goal: str, start_url: str, documents: list[dict], judge: Rel
     return [AgenticDownload(
         url=d['url'], name=d['name'] or d['url'].rsplit('/', 1)[-1], reason='generated program', source_page=start_url,
         relevance=s, verdict=verdict_for(s), source='program', period=period_of(f"{d['name']} {d['url']}"),
-        year=year_of(f"{d.get('context', '')} {d['name']} {d['url']}")) for d, s in zip(documents, scores)]
+        year=year_of(f"{d.get('context', '')} {d['name']} {d['url']}"), published=date_of(d.get('context', '')))
+        for d, s in zip(documents, scores)]
 
 
 def run_saved(program: Program, judge: RelevanceJudge, runner=run_program) -> tuple[dict, list[AgenticDownload]]:

@@ -116,6 +116,11 @@ answers), the rest of the group goes. Otherwise each document is asked about on 
 listed? - and dropped only when the judge is sure. Anything less is kept. Grouping by look is only a question: the
 judge tells two products apart as readily as two editions.
 
+Where a site shows a date beside a document - in its row, its dated line - that date is the `published` facet
+(`YYYY-MM-DD`). Only forms with one meaning are read (`2026-03-12`, `12.03.2026`, `12 March 2026`,
+`2026. március 12.`), never a slash date like `03/12/2026` and never a file name. It orders a series whose names
+cannot (one file name a site overwrites each month), and the judge sees it when it compares editions.
+
 The `period` facet (`2026-03`, `2026-Q1`, `2026-H1` or `2026`, read in English, German, Hungarian, French, Spanish
 and Italian) is a best-effort label for people and callers, not what the filter decides by.
 
@@ -202,7 +207,7 @@ Main request fields for `/v1/discover`:
 | `model` | `LLM_MODEL` | Agent model override. |
 
 The result lists the documents with `relevance`, `verdict`, `source` (page, sitemap, api, agent, program),
-`period`, `year`, `series` and `latest_in_series`, plus `stop_reason`, token counts and which model decided.
+`period`, `year`, `published`, `series` and `latest_in_series`, plus `stop_reason`, token counts and which model decided.
 
 ## Crawling responsibly
 

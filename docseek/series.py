@@ -1,6 +1,7 @@
 """Periods and series: which document is the newest of its kind, read by code, never by a model.
 
   period_of(text)      '2026-03' | '2026-Q1' | '2026-H1' | '2026' | None, from a document's name and URL
+  date_of(text)        'YYYY-MM-DD' when a site shows a document's date in a form with one meaning, else None
   series_key(url, name) what stays of a document's identity once its period is taken out
   order_of(url, name)  what orders the documents of one series, with no interpretation of what the numbers mean
   mark_latest(docs)    sets each document's `series` and `latest_in_series` facets; returns the superseded ones
@@ -19,6 +20,7 @@ not read: '450-7/2026' is a case number and '/2016/05/' an upload folder, not a 
 """
 from __future__ import annotations
 
+import datetime
 import re
 from urllib.parse import unquote, urlparse
 
@@ -109,6 +111,36 @@ def period_of(text: str) -> str | None:
     return None
 
 
+# Dates as a site shows them next to a document, in forms with one meaning only: day-first with dots is European,
+# a month name is a month. Slash dates (03/12/2026) are day-first in one country and month-first in another: not read.
+_DATES = [
+    (re.compile(r'(?<!\d)(20\d\d)-(\d\d)-(\d\d)(?!\d)'), ('y', 'm', 'd')),
+    (re.compile(r'(?<![\d.])(\d{1,2})\. ?(\d{1,2})\. ?(20\d\d)(?!\d)'), ('d', 'm', 'y')),
+    (re.compile(r'(?<!\d)(20\d\d)\. ?(\d{1,2})\. ?(\d{1,2})\.'), ('y', 'm', 'd')),
+    (re.compile(rf'(?<!\d)(20\d\d)\. ?({_WORDS})[{_L}]* (\d{{1,2}})\.', re.IGNORECASE), ('y', 'w', 'd')),
+    (re.compile(rf'(?<!\d)(\d{{1,2}})\.? (?:de )?({_WORDS})[{_L}]* (?:de )?(20\d\d)(?!\d)', re.IGNORECASE),
+     ('d', 'w', 'y')),
+    (re.compile(rf'(?<![{_L}])({_WORDS})[{_L}]* (\d{{1,2}}),? (20\d\d)(?!\d)', re.IGNORECASE), ('w', 'd', 'y')),
+]
+
+
+def date_of(text: str) -> str | None:
+    """The first date in `text` written in a form with one meaning ('2026-03-12', '12.03.2026', '12 March 2026',
+    'March 12, 2026', '2026. március 12.'), as 'YYYY-MM-DD'. Read from what a site shows beside a document - its
+    row, its dated line - never from its file name."""
+    found = []
+    for pattern, order in _DATES:
+        for m in pattern.finditer(text or ''):
+            parts = dict(zip(order, m.groups()))
+            month = _MONTH_WORD[parts['w'].lower()] if 'w' in parts else int(parts['m'])
+            try:
+                found.append((m.start(), datetime.date(int(parts['y']), month, int(parts['d'])).isoformat()))
+            except ValueError:
+                continue
+            break
+    return min(found)[1] if found else None
+
+
 _GENERIC_NAMES = {'download', 'downloads', 'file', 'files', 'document', 'documents', 'doc', 'view', 'get', 'getfile',
                   'attachment', 'index', 'default', 'pdf', 'show', 'open', 'dl', 'fetch', 'content', 'media', 'asset'}
 _SCRIPT_EXTENSIONS = ('aspx', 'php', 'asp', 'jsp', 'ashx', 'cgi')
@@ -169,9 +201,10 @@ def order_of(url: str, name: str = '') -> tuple[tuple, tuple]:
 def mark_latest(documents: list) -> list:
     """Set `series`, `latest_in_series` (and a best-effort `period`) on each AgenticDownload; return the superseded.
 
-    Within a series, documents are ordered by order_of. When in doubt, nothing is dropped: latest_in_series is None
-    - and the document kept - when its series mixes formats (2026-Q1 beside 2026-03), when it has nothing to order
-    by, or when it was rejected. Only accepted, unsure or unscored documents can supersede another."""
+    Within a series, documents are ordered by order_of. When their names cannot order them - a series that mixes
+    formats (2026-Q1 beside 2026-03), or one file name a site overwrites each month - the dates the site shows beside
+    them (`published`) order them, if every one has one. Otherwise nothing is dropped: latest_in_series is None and
+    the document kept. Rejected documents are never compared, so they supersede nothing."""
     series: dict[str, list] = {}
     for doc in documents:
         doc.period = doc.period or period_of(f'{doc.name} {doc.url}')
@@ -183,7 +216,9 @@ def mark_latest(documents: list) -> list:
     for members in series.values():
         shapes = {shape for _, shape, _ in members}
         if len(shapes) != 1 or not next(iter(shapes)):
-            continue                                       # mixed formats or nothing to order by: keep them all
+            if len(members) < 2 or not all(getattr(doc, 'published', None) for doc, _, _ in members):
+                continue                                   # nothing trustworthy to order by: keep them all
+            members = [(doc, ('date',), (doc.published,)) for doc, _, _ in members]
         newest = max(key for _, _, key in members)
         for doc, _, key in members:
             doc.latest_in_series = key == newest
@@ -220,7 +255,7 @@ def refine_latest(documents: list, goal: str, judge, superseded_at: float | None
                 and not (len({d.series for d in members}) == 1 and all(d.latest_in_series for d in members))]
     superseded = []
     for members in doubtful[:MAX_JUDGED_GROUPS]:
-        shown = [{'name': d.name, 'url': d.url} for d in members]
+        shown = [{'name': d.name, 'url': d.url, 'date': getattr(d, 'published', None)} for d in members]
         # First the group as a whole: when the judge is sure it is one document's editions and sure which is the
         # newest, the rest go. Otherwise (several documents, or unsure) each is asked about on its own.
         same, newest, sure = judge.edition_group(goal, shown)

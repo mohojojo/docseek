@@ -87,7 +87,14 @@ class RelevanceJudge(Protocol):
 
 
 def document_states(documents: list[dict]) -> list[dict]:
-    return [link_state(f'D{i + 1}', d.get('name', ''), d['url'], d.get('context', '')) for i, d in enumerate(documents)]
+    """What a judge sees of documents it compares: each one's link, and the date the site shows beside it."""
+    states = []
+    for i, d in enumerate(documents):
+        state = link_state(f'D{i + 1}', d.get('name', ''), d['url'], d.get('context', ''))
+        if d.get('date'):
+            state['date_shown_on_site'] = d['date']
+        states.append(state)
+    return states
 
 
 def verdict_for(relevance: float | None) -> str:

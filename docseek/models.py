@@ -65,6 +65,7 @@ class AgenticDownload(BaseModel):
     source: Literal['page', 'sitemap', 'api', 'agent', 'program'] = 'agent'
     period: str | None = None
     year: str | None = None      # the year of the document's dated line, read by code, a Facet
+    published: str | None = None # 'YYYY-MM-DD' as the site shows it beside the document (never its file name), a Facet
     series: str | None = None    # the document's identity with its period taken out (docseek.series), a Facet
     latest_in_series: bool | None = None   # newest of its series; None: no period, or rejected
 
