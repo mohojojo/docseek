@@ -220,10 +220,18 @@ def refine_latest(documents: list, goal: str, judge, superseded_at: float | None
                 and not (len({d.series for d in members}) == 1 and all(d.latest_in_series for d in members))]
     superseded = []
     for members in doubtful[:MAX_JUDGED_GROUPS]:
-        for doc, p in zip(members, judge.older_editions(goal, [{'name': d.name, 'url': d.url} for d in members])):
-            if p is not None and p >= threshold:
-                doc.latest_in_series = False
-                superseded.append(doc)
+        shown = [{'name': d.name, 'url': d.url} for d in members]
+        # First the group as a whole: when the judge is sure it is one document's editions and sure which is the
+        # newest, the rest go. Otherwise (several documents, or unsure) each is asked about on its own.
+        same, newest, sure = judge.edition_group(goal, shown)
+        if same is not None and same >= threshold and newest is not None and sure is not None and sure >= threshold:
+            older = [doc for i, doc in enumerate(members) if i != newest]
+        else:
+            older = [doc for doc, p in zip(members, judge.older_editions(goal, shown))
+                     if p is not None and p >= threshold]
+        for doc in older:
+            doc.latest_in_series = False
+            superseded.append(doc)
     return superseded
 
 

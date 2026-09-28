@@ -27,8 +27,8 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from .judge import (  # noqa: F401 - re-exported: the shared Verdict bands and link state live in docseek.judge
-    ACCEPTED_AT, C_HIDDEN, C_OLDER, HIDDEN_DOCS_AT, MAX_FILTER_OPTIONS, Q_HIDDEN, Q_OLDER, REJECTED_BELOW,
-    document_states, is_weakly_named, link_state, verdict_for,
+    ACCEPTED_AT, C_HIDDEN, C_OLDER, C_SAME, HIDDEN_DOCS_AT, MAX_FILTER_OPTIONS, Q_HIDDEN, Q_NEWEST, Q_OLDER, Q_SAME,
+    REJECTED_BELOW, document_states, is_weakly_named, link_state, verdict_for,
 )
 from .profile import Profile, load_profile
 
@@ -232,6 +232,18 @@ class JevClient:
             if answer['choice'] != 'keep':
                 picks[f['id']] = (f['options'][int(answer['choice'][1:])], answer['probabilities'][answer['choice']])
         return picks
+
+    def edition_group(self, goal: str, documents: list[dict]) -> tuple[float | None, int | None, float | None]:
+        """(P every document is an edition of one document, index of the newest, P that one is the newest)."""
+        states = document_states(documents)
+        answers = self.ask({'goal': goal, 'documents': states}, {
+            'same': {'type': 'noul', 'instructions': Q_SAME, 'criteria': C_SAME},
+            'newest': {'type': 'choice', 'instructions': Q_NEWEST,
+                       'criteria': {s['id']: f"{s['id']} is the newest edition in the list" for s in states}}})
+        if not answers:
+            return None, None, None
+        newest = answers['newest']
+        return answers['same']['noul'], int(newest['choice'][1:]) - 1, newest['probabilities'][newest['choice']]
 
     def older_editions(self, goal: str, documents: list[dict]) -> list[float | None]:
         """For each document, the probability that a newer edition of it is also in the list. Every question sees

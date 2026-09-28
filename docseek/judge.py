@@ -4,8 +4,9 @@
     page_kinds(goal, links)                        -> (page kind, probability) per link: ranks the Frontier
     hides_documents(goal, page_state)              -> probability the page hides documents: triggers an Escalation
     filter_values(goal, page_state, filters)       -> the value to set per filter, before any Escalation
+    edition_group(goal, documents)                 -> (P all are editions of one document, newest index, P it is newest)
     older_editions(goal, documents)                -> probability per document that a newer edition of it is listed
-                                                      (docseek.series asks, for groups code could not order)
+                                                      (docseek.series asks both, for groups code could not order)
 
 Adapters: JevClient (docseek.jev, TypeSafe Jev: calibrated probabilities) and LLMJudge (any model through
 docseek.llm). Each adapter maps its answers into the shared Verdict bands below. A judge reports `open` when it
@@ -41,6 +42,15 @@ C_OLDER = {
              'the others are about another product, fund or subject, in another language, or of another type.',
 }
 
+Q_SAME = ('Are all documents in this list editions of one and the same document - the same subject, type and '
+          'language, differing only in the period they cover or the date they were issued?')
+C_SAME = {
+    'true': 'Every listed document is an edition of the same document; only their periods or dates differ.',
+    'false': 'At least two listed documents are different documents: another product, fund or subject, another '
+             'language, or another type.',
+}
+Q_NEWEST = 'Which listed document is the newest edition?'
+
 Q_HIDDEN = ('Does this page still hide documents the goal asks for behind a control that has not been used '
             '(a tab, a dropdown, a filter, a search or other form, a "load more" button, or an investor or '
             'country gate)?')
@@ -70,6 +80,8 @@ class RelevanceJudge(Protocol):
     def hides_documents(self, goal: str, page_state: dict) -> float | None: ...
 
     def filter_values(self, goal: str, page_state: dict, filters: list[dict]) -> dict[str, tuple[str, float]]: ...
+
+    def edition_group(self, goal: str, documents: list[dict]) -> tuple[float | None, int | None, float | None]: ...
 
     def older_editions(self, goal: str, documents: list[dict]) -> list[float | None]: ...
 
@@ -193,6 +205,19 @@ class LLMJudge:
             return [LEVELS.get(str(answer.get(f'L{i + 1}', '')).strip().lower()) for i in range(len(chunk))]
         return self._batched(candidates, ask_chunk)
 
+    def edition_group(self, goal: str, documents: list[dict]) -> tuple[float | None, int | None, float | None]:
+        states = document_states(documents)
+        user = (f'Goal: {goal}\n\nDocuments:\n{json.dumps(states, ensure_ascii=False)}\n\n'
+                f'1. {Q_SAME}\nYes when: {C_SAME["true"]}\nNo when: {C_SAME["false"]}\n'
+                f'Answer one of: {", ".join(LEVELS)}.\n'
+                f'2. {Q_NEWEST} Give its id, and how sure you are ({", ".join(SURENESS)}).\n'
+                f'Reply as {{"same": "<answer>", "newest": "D<n>", "sure": "<sureness>"}}.')
+        answer = self._ask(user) or {}
+        match = re.fullmatch(r'D(\d+)', str(answer.get('newest', '')).strip())
+        index = int(match[1]) - 1 if match and 0 < int(match[1]) <= len(documents) else None
+        return (LEVELS.get(str(answer.get('same', '')).strip().lower()), index,
+                SURENESS.get(str(answer.get('sure', '')).strip().lower()) if index is not None else None)
+
     def older_editions(self, goal: str, documents: list[dict]) -> list[float | None]:
         states = document_states(documents)
 
@@ -284,6 +309,9 @@ class FallbackJudge:
 
     def filter_values(self, goal, page_state, filters):
         return self._call('filter_values', goal, page_state, filters)
+
+    def edition_group(self, goal, documents):
+        return self._call('edition_group', goal, documents)
 
     def older_editions(self, goal, documents):
         return self._call('older_editions', goal, documents)

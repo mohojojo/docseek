@@ -110,9 +110,11 @@ wrong keep costs a caller one extra document; a wrong drop would lose one.
 
 What code cannot settle goes to the relevance judge, and only with `latest`. Documents that look alike once their
 numbers are taken out (`ETALON-2211` beside `ETALON-2212`, `2026-Q1` beside `2026-03`, but also `cm4` beside `cm5`)
-form a doubtful group, and the judge is asked, for each, whether a newer edition of the same document is in the list.
-It is dropped only when the judge is sure (probability 0.8 or more with Jev's calibrated answers); anything less is
-kept. Grouping by look is only a question: the judge tells two products apart as readily as two editions.
+form a doubtful group, and the judge is asked about it. First about the group as a whole: are these all editions of
+one document, and which is the newest? When it is sure of both (probability 0.8 or more with Jev's calibrated
+answers), the rest of the group goes. Otherwise each document is asked about on its own - is a newer edition of it
+listed? - and dropped only when the judge is sure. Anything less is kept. Grouping by look is only a question: the
+judge tells two products apart as readily as two editions.
 
 The `period` facet (`2026-03`, `2026-Q1`, `2026-H1` or `2026`, read in English, German, Hungarian, French, Spanish
 and Italian) is a best-effort label for people and callers, not what the filter decides by.

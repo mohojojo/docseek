@@ -165,8 +165,11 @@ def test_product_numbers_are_identity_not_order():
 class FakeEditionJudge:
     """Answers older_editions from a dict of url -> probability, and records what it was asked."""
 
-    def __init__(self, probabilities):
-        self.probabilities, self.asked = probabilities, []
+    def __init__(self, probabilities, group=(None, None, None)):
+        self.probabilities, self.group, self.asked = probabilities, group, []
+
+    def edition_group(self, goal, documents):
+        return self.group
 
     def older_editions(self, goal, documents):
         self.asked.append([d['url'] for d in documents])
@@ -234,3 +237,45 @@ def test_both_judges_ask_about_every_document_with_the_whole_list_in_view():
     jev.ask = ask
     assert jev.older_editions('g', docs) == [0.9, 0.2]
     assert [d['id'] for d in seen['state']['documents']] == ['D1', 'D2'] and set(seen['questions']) == {'q1', 'q2'}
+
+
+class TestGroupQuestion:
+    URLS = [f'https://s.example/ALAP-LAP_START-{n}.pdf' for n in (2310, 2404, 2407, 2408)]
+
+    def test_one_documents_editions_keep_only_the_newest(self):
+        from docseek.series import refine_latest
+        docs = [doc(u) for u in self.URLS]
+        mark_latest(docs)
+        judge = FakeEditionJudge({}, group=(0.93, 3, 0.99))
+        assert [d.url for d in refine_latest(docs, 'g', judge)] == self.URLS[:3]
+        assert judge.asked == []                            # the group answer was enough
+
+    def test_not_one_document_or_not_sure_falls_back_to_each_document(self):
+        from docseek.series import refine_latest
+        for group in ((0.09, 3, 0.99), (0.93, 3, 0.7), (None, None, None)):
+            docs = [doc(u) for u in self.URLS]
+            mark_latest(docs)
+            judge = FakeEditionJudge({self.URLS[0]: 0.9}, group=group)
+            assert [d.url for d in refine_latest(docs, 'g', judge)] == self.URLS[:1], group
+            assert len(judge.asked) == 1
+
+
+def test_both_judges_answer_the_group_question():
+    from docseek.jev import JevClient
+    from docseek.judge import LLMJudge
+
+    class FakeLLM:
+        model, usage = 'fake', type('U', (), {'requests': 0})()
+
+        def complete_json(self, system, user):
+            return {'same': 'clearly_yes', 'newest': 'D2', 'sure': 'sure'}
+    docs = [{'name': 'Report 2211', 'url': 'https://s.example/r-2211.pdf'},
+            {'name': 'Report 2212', 'url': 'https://s.example/r-2212.pdf'}]
+    assert LLMJudge(FakeLLM()).edition_group('g', docs) == (0.95, 1, 0.9)
+
+    jev = JevClient(api_key='k')
+    jev.ask = lambda state, questions: {'same': {'noul': 0.92},
+                                        'newest': {'choice': 'D2', 'probabilities': {'D1': 0.03, 'D2': 0.97}}}
+    assert jev.edition_group('g', docs) == (0.92, 1, 0.97)
+    jev.ask = lambda state, questions: None
+    assert jev.edition_group('g', docs) == (None, None, None)
