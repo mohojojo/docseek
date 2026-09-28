@@ -108,3 +108,43 @@ class TestDefault:
         from docseek.server import DiscoverRequest
         assert inspect.signature(jev_crawl).parameters['frontier_policy'].default == 'tier'
         assert DiscoverRequest(url='https://site-hu.example', goal='g').frontier_policy == 'tier'
+
+
+class TestGoalYear:
+    def test_the_years_a_goal_names_including_ranges(self):
+        from docseek.jev_crawl import goal_years
+        assert goal_years('Finde alle Ausgaben des Amtsblatts aus dem Jahr 2025') == {'2025'}
+        assert goal_years('Find the annual reports from 2021 to 2025') == {'2021', '2022', '2023', '2024', '2025'}
+        assert goal_years('Voranschläge der Jahre 2021 bis 2023') == {'2021', '2022', '2023'}
+        assert goal_years('Informes Anuales de 2020 a 2022') == {'2020', '2021', '2022'}
+        assert goal_years('Find every annual report') == frozenset()
+
+    def test_a_link_names_the_year_in_its_text_or_url_not_inside_a_longer_number(self):
+        from docseek.jev_crawl import names_goal_year
+        years = frozenset({'2025'})
+        assert names_goal_year({'name': 'Amtsblatt 2025', 'url': 'https://s.example/a'}, years)
+        assert names_goal_year({'name': 'Archiv', 'url': 'https://s.example/amtsblatt-2025/'}, years)
+        assert not names_goal_year({'name': 'Amtsblatt', 'url': 'https://s.example/id/202512345'}, years)
+        assert not names_goal_year({'name': 'Amtsblatt 2025', 'url': 'https://s.example/a'}, frozenset())
+
+    def test_the_goal_years_archive_goes_before_the_current_listing(self):
+        current = frontier_key('document_listing', 0.95, 1, False, 0)
+        archive = frontier_key('category_or_overview', 0.7, 1, False, 1, goal_year=True)
+        news = frontier_key('news_or_article', 0.9, 1, False, 2, goal_year=True)
+        assert sorted([current, news, archive]) == [archive, current, news]   # news is never promoted
+
+    def test_the_frontier_knows_a_goal_year_page_is_still_waiting(self):
+        f = Frontier()
+        f.add('https://s.example/amtsblatt-2026/', kind='document_listing', probability=0.9, depth=1)
+        assert not f.has_goal_year_page()
+        f.add('https://s.example/amtsblatt-2025/', kind='category_or_overview', probability=0.6, depth=1,
+              goal_year=True)
+        assert f.has_goal_year_page()
+        assert f.pop()[0] == 'https://s.example/amtsblatt-2025/'
+        assert not f.has_goal_year_page()
+
+
+def test_a_news_page_naming_the_year_does_not_hold_the_crawl_open():
+    f = Frontier()
+    f.add('https://s.example/news/2025-results', kind='news_or_article', probability=0.9, depth=1, goal_year=True)
+    assert not f.has_goal_year_page()

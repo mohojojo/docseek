@@ -363,6 +363,26 @@ def goal_language(goal: str) -> str | None:
     return best if ranked[0] > 0 and ranked[0] > ranked[1] else None
 
 
+_YEAR = re.compile(r'(?<!\d)(19[89]\d|20\d\d)(?!\d)')
+_YEAR_RANGE = re.compile(r'(?<!\d)(19[89]\d|20\d\d)\s*(?:-|–|to|until|through|bis|a|al|à|au|és|y)\s*(19[89]\d|20\d\d)(?!\d)',
+                         re.IGNORECASE)
+
+
+def goal_years(goal: str) -> frozenset[str]:
+    """The years a goal names, a range written out in full ('2020 bis 2025' is 2020 to 2025). These are years the
+    user typed, not dates read from a page: nothing here is guessed."""
+    years = set(_YEAR.findall(goal or ''))
+    for start, end in _YEAR_RANGE.findall(goal or ''):
+        if 0 < int(end) - int(start) <= 30:
+            years.update(str(y) for y in range(int(start), int(end) + 1))
+    return frozenset(years)
+
+
+def names_goal_year(link: dict, years: frozenset[str]) -> bool:
+    """The link's text or URL names one of the goal's years (as a whole number, not inside a longer one)."""
+    return bool(years) and bool(set(_YEAR.findall(f"{link.get('name', '')} {link.get('url', '')}")) & years)
+
+
 def url_language(url: str) -> str | None:
     """A leading language path segment, e.g. /en/investment-funds -> 'en'. None means the site default."""
     first = urlparse(url).path.strip('/').split('/')[0].lower()
@@ -509,6 +529,7 @@ def jev_crawl(
     emit = on_event or (lambda ev: None)
     agent = agent or agent_llm(None, api_key)     # the LLM an Escalation (and the agent fallback) runs on
     language = goal_language(goal)
+    years = goal_years(goal)
     lock = threading.Lock()
 
     try:
@@ -612,7 +633,8 @@ def jev_crawl(
                 other = language is not None and url_language(c['url']) not in (None, language)
                 queued_from[c['url']] = (c, parent)
                 frontier.add(c['url'], kind=kind, probability=probability, depth=depth, other_language=other,
-                             path_seen=variants > 0, group=c.get('path', ''), parent=parent)
+                             path_seen=variants > 0, group=c.get('path', ''), parent=parent,
+                             goal_year=names_goal_year(c, years))
                 queued += 1
         return queued
 
@@ -1026,10 +1048,12 @@ def jev_crawl(
                 stop_reason = 'max_seconds'
                 break
             # ...but not while a tier-1 group nobody has visited is still queued: one crawl gave up
-            # with much of its budget unspent and fund pages still waiting
+            # with much of its budget unspent and fund pages still waiting. Nor while a page naming the
+            # goal's year waits: a crawl asked for 2025 rejected the whole 2026 listing and quit with the
+            # 2025 archive queued.
             if should_stop_for_no_progress(progress['stale'], len(pages), max_pages,
                                            time.perf_counter() - started, max_seconds) \
-                    and not frontier.has_untried_tier1():
+                    and not frontier.has_untried_tier1() and not frontier.has_goal_year_page():
                 stop_reason = 'no_progress'
                 break
             if judge.open:

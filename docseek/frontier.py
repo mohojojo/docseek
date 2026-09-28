@@ -44,14 +44,23 @@ DRY_PAGES = 7             # replayed on recorded sites: a shorter dry run alread
 
 
 def frontier_key(kind: str, probability: float, depth: int, other_language: bool, order: int,
-                 path_seen: bool = False) -> tuple:
-    """Tier ordering: goal language, then tier, then unseen paths, then P(kind), depth, discovery order.
+                 path_seen: bool = False, goal_year: bool = False) -> tuple:
+    """Tier ordering: goal language, then tier, then the goal's year, then unseen paths, then P(kind), depth,
+    discovery order.
 
     `path_seen` demotes another query-variant of a path already queued. A Liferay listing offers its
     own pagination as `?…_cur=1…10` and `?…_delta=8…60`: such variants once filled most of a
     crawl's page budget, all yielding nothing, while the fund pages waited.
+
+    `goal_year`: the link names a year the goal names. A site lists the current year and links each earlier year's
+    archive, and a crawl asked for 2025 spent its budget on the 2026 listing while the `…-2025` archive waited. Such
+    a link goes first within its tier, and a category page for that year counts as a listing; a news or legal page
+    naming the year is not promoted.
     """
-    return (1 if other_language else 0, KIND_TIER.get(kind, 2), 1 if path_seen else 0,
+    tier = KIND_TIER.get(kind, 2)
+    if goal_year and tier == 2:
+        tier = 1
+    return (1 if other_language else 0, tier, 0 if goal_year else 1, 1 if path_seen else 0,
             -probability, depth, order)
 
 
@@ -66,7 +75,7 @@ class _Item:
     url: str
     depth: int
     kind: str
-    outer: tuple          # (other language, tier, path already queued): never crossed by the bandit
+    outer: tuple          # (other language, tier, goal's year, path already queued): never crossed by the bandit
     inner: tuple          # (-P(kind), depth, discovery order)
     group: str
 
@@ -98,21 +107,21 @@ class Frontier:
         return len(self.items)
 
     def add(self, url: str, *, kind: str, probability: float, depth: int, other_language: bool = False,
-            path_seen: bool = False, group: str = '', parent: str | None = None) -> None:
+            path_seen: bool = False, group: str = '', parent: str | None = None, goal_year: bool = False) -> None:
         group = group or url_template(url)
-        key = frontier_key(kind, probability, depth, other_language, self._order + 1, path_seen)
+        key = frontier_key(kind, probability, depth, other_language, self._order + 1, path_seen, goal_year)
         tier = key[1]
         if group not in self.groups:
             self.groups[group] = _Group()
             if parent and tier == 1:
                 self._opened_by[parent] = self._opened_by.get(parent, 0) + 1
         self._order += 1
-        self.items[url] = _Item(url, depth, kind, key[:3], key[3:], group)
+        self.items[url] = _Item(url, depth, kind, key[:4], key[4:], group)
         self._group_of[url] = group
 
     def add_seed(self, url: str) -> None:
         self.groups.setdefault('seed', _Group())
-        self.items[url] = _Item(url, 0, 'seed', (0, 0, 0), (-1.0, 0, 0), 'seed')
+        self.items[url] = _Item(url, 0, 'seed', (0, 0, 0, 0), (-1.0, 0, 0), 'seed')
         self._group_of[url] = 'seed'
 
     def _score(self, group: str) -> float:
@@ -142,6 +151,11 @@ class Frontier:
         """True while a tier-1 group nobody has visited is still queued: the crawl has not looked everywhere."""
         return self.policy != 'tier' and any(
             i.outer[1] <= 1 and not self.groups[i.group].picked for i in self.items.values())
+
+    def has_goal_year_page(self) -> bool:
+        """True while a listing naming the goal's year is still queued: the archive the goal asks for is unvisited.
+        A news or legal page that merely names the year does not hold the crawl open."""
+        return any(i.outer[2] == 0 and i.outer[1] <= 1 for i in self.items.values())
 
     def record(self, url: str, accepted: int) -> None:
         """What visiting `url` paid: documents accepted for the first time, plus new tier-1 groups."""
