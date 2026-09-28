@@ -125,9 +125,17 @@ def health(error: str | None, kept: int, last_kept: int | None) -> str:
     return 'healthy'
 
 
+def as_candidates(documents: list[dict]) -> list[dict]:
+    """A program's documents as the judge sees a crawl's links. A program's `context` is by definition where the
+    document sits (its section, column or tab, its row, its date), so it goes where a crawl puts the section heading
+    - shown with every link - not in the surrounding text, which a judge only sees for links with short names."""
+    return [{'url': d['url'], 'name': d['name'], 'context': d.get('context', ''), 'section': d.get('context', '')}
+            for d in documents]
+
+
 def judge_documents(goal: str, start_url: str, documents: list[dict], judge: RelevanceJudge) -> list[AgenticDownload]:
     """The crawl's own relevance question over what a program returned."""
-    candidates = [{'url': d['url'], 'name': d['name'], 'context': d.get('context', '')} for d in documents]
+    candidates = as_candidates(documents)
     scores = judge.relevance(goal, f'documents found on {start_url}', candidates) if candidates else []
     return [AgenticDownload(
         url=d['url'], name=d['name'] or d['url'].rsplit('/', 1)[-1], reason='generated program', source_page=start_url,

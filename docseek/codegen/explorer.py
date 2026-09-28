@@ -208,7 +208,8 @@ class Explorer:
 
     def judge(self, documents: list[dict]) -> list[dict]:
         """The crawl's own relevance question over what a program returned."""
-        candidates = [{'url': d['url'], 'name': d['name'], 'context': d['context']} for d in documents]
+        from .programs import as_candidates           # the same view of a program's documents as its replays get
+        candidates = as_candidates(documents)
         scores = self.relevance_judge.relevance(self.goal, f'documents found on {self.start_url}', candidates)
         return [{**d, 'relevance': s, 'verdict': verdict_for(s)} for d, s in zip(documents, scores)]
 

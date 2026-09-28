@@ -180,3 +180,15 @@ class TestVerifiedAndLog:
         assert program is None and report['turns'] == 42 and 'log' not in report
         assert log['log'][0]['result'] == '403 Access Denied' and store.last_attempt(KEY) is not None
         assert store.keys() == []                          # a log alone is not a program
+
+
+def test_a_programs_context_reaches_the_judge_even_beside_a_long_title():
+    # A long title hides the surrounding text from the judge; a program's context says where the document sits,
+    # so it travels as the section heading, which the judge always sees.
+    from docseek.codegen.programs import as_candidates
+    from docseek.judge import link_state
+    doc = {'url': 'https://s.example/r.pdf', 'name': 'DSGVO-Reform: IT-Hersteller in die Verantwortung nehmen!',
+           'context': "Entschließung vom 12.12.2025, gelistet unter 'Entschließungen'"}
+    candidate = as_candidates([doc])[0]
+    state = link_state('L1', candidate['name'], candidate['url'], candidate['context'], candidate['section'])
+    assert "gelistet unter 'Entschließungen'" in state['section_heading']
