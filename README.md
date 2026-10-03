@@ -21,12 +21,13 @@ The crawl is driven by a **relevance judge** that answers four questions, and co
    fills in and scrolls until it finds them.
 4. **Which filter value shows the documents?** Code finds the page's filters, the judge picks the value, code sets it.
 
-Two judges are built in:
+Three judges are built in:
 
 | Judge | What it is |
 | --- | --- |
 | `llm` | Any LLM: Anthropic, or any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, OpenRouter, Gemini, Ollama, vLLM, LM Studio). Answers on five levels mapped into the verdict bands. |
 | `jev` | [TypeSafe Jev](https://typesafe.ai), a decision model that returns calibrated probabilities. Needs a TypeSafe key. If it becomes unavailable mid-crawl, the LLM judge takes over. |
+| `laya` | [Laya](https://github.com/NandhaKishorM/laya), an open-source decision model that serves Jev's wire protocol from your own hardware (`pip install "laya[serve]"`, then `laya-serve`). Needs `LAYA_URL`; runs only when asked for by name. The verdict bands were calibrated on Jev, so measure it on your sites first (`eval.run_jev --judge laya`). Same LLM fallback as Jev. |
 
 The judge's wording comes from a **domain profile** (`profile`): `generic` works for any goal; `fund-reports`
 is an example of a profile tuned for one domain (periodic fund documents). A profile is a small JSON file -
@@ -171,6 +172,10 @@ Health cannot tell when a program confidently returns the wrong slice of a site;
 | `LLM_API_KEY` | Key for the LLM (falls back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`; a local server may need none). |
 | `ANTHROPIC_API_KEY` | Enough on its own to run everything on Claude. `/v1/search-sites` uses Anthropic's web search and always needs it. |
 | `TYPESAFE_API_KEY` | Enables the `jev` judge (the default judge when set). |
+| `LAYA_URL` | Base URL of a Laya server (e.g. `http://localhost:8000`). Enables the `laya` judge. |
+| `LAYA_API_KEY` | Bearer token, when the Laya server was started with one. |
+| `LAYA_MODEL` | Laya checkpoint to use: `english`, `multilingual` or `typed-decisions`. Unset: Laya routes each request itself. |
+| `LAYA_MAX_LEN` | Tokens of state Laya reads per request (default 8192, which is also the server's default cap `LAYA_MAX_TOKEN_BUDGET`). |
 | `JEV_PRICE_PER_MTOK` | Your TypeSafe price per million input tokens, used only for the cost the result reports (`jev_cost_usd`). Default 0. |
 | `CRAWLER_API_KEY` | When set, every request must send it as `X-API-Key`. Unset, the API is open - set it before exposing the service. |
 | `PROGRAMS_DIR` | Directory for generated discovery programs. Unset: the feature is off. |

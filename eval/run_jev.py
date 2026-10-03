@@ -175,7 +175,7 @@ def main() -> None:
                     help="Frontier policy. 'tier' is what the service defaults to.")
     ap.add_argument('--recipes', default=None,
                     help='Directory for escalation recipes: record on the first crawl, replay on the next')
-    ap.add_argument('--judge', choices=['jev', 'llm'], default=None,
+    ap.add_argument('--judge', choices=['jev', 'laya', 'llm'], default=None,
                     help='Relevance judge (default: Jev when TYPESAFE_API_KEY is set, the LLM judge otherwise)')
     ap.add_argument('--profile', default=None, help="Override every site's domain profile (default: the site's own)")
     ap.add_argument('--no-snapshots', action='store_true')

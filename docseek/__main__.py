@@ -23,7 +23,7 @@ def _programs_dir_arg(parser: argparse.ArgumentParser) -> None:
 
 def _judge_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--profile', default='generic', help='Domain profile name or path (default: generic)')
-    parser.add_argument('--judge', choices=('jev', 'llm'), default=None,
+    parser.add_argument('--judge', choices=('jev', 'laya', 'llm'), default=None,
                         help='Relevance judge (default: jev when TYPESAFE_API_KEY is set, else llm)')
 
 

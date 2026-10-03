@@ -8,8 +8,8 @@
     older_editions(goal, documents)                -> probability per document that a newer edition of it is listed
                                                       (docseek.series asks both, for groups code could not order)
 
-Adapters: JevClient (docseek.jev, TypeSafe Jev: calibrated probabilities) and LLMJudge (any model through
-docseek.llm). Each adapter maps its answers into the shared Verdict bands below. A judge reports `open` when it
+Adapters: JevClient (docseek.jev, TypeSafe Jev: calibrated probabilities), LayaClient (docseek.jev, a self-hosted
+Laya server on Jev's wire protocol) and LLMJudge (any model through docseek.llm). Each adapter maps its answers into the shared Verdict bands below. A judge reports `open` when it
 can answer nothing more in this crawl, and `unavailable_reason` says why.
 """
 from __future__ import annotations
@@ -349,14 +349,19 @@ class FallbackJudge:
 def make_judge(judge: str | None = None, profile: str | Profile | None = None,
                llm: LLMClient | None = None) -> RelevanceJudge:
     """The judge to run. judge='jev': TypeSafe Jev, with the LLM judge as its fallback when one is configured;
-    judge='llm': the LLM judge alone; None: Jev when TYPESAFE_API_KEY is set, the LLM judge otherwise."""
-    from .jev import JevClient
+    judge='laya': a Laya server at LAYA_URL, with the same fallback; judge='llm': the LLM judge alone;
+    None: Jev when TYPESAFE_API_KEY is set, the LLM judge otherwise (Laya only runs when asked for by name)."""
+    from .jev import JevClient, LayaClient
 
     profile = profile if isinstance(profile, Profile) else load_profile(profile)
     has_jev = bool(os.environ.get('TYPESAFE_API_KEY'))
-    if judge not in (None, 'jev', 'llm'):
-        raise JudgeUnavailable(f'unknown judge {judge!r}: use jev or llm')
+    if judge not in (None, 'jev', 'laya', 'llm'):
+        raise JudgeUnavailable(f'unknown judge {judge!r}: use jev, laya or llm')
     llm = llm or make_llm()
+    if judge == 'laya':
+        if not os.environ.get('LAYA_URL'):
+            raise JudgeUnavailable('LAYA_URL is missing (judge="laya")')
+        return FallbackJudge(LayaClient(profile=profile), LLMJudge(llm, profile) if llm else None)
     if judge == 'jev' or (judge is None and has_jev):
         if not has_jev:
             raise JudgeUnavailable('TYPESAFE_API_KEY is missing (judge="jev")')

@@ -15,6 +15,9 @@ Design choices:
   - A filtered listing gets one Choice per filter (its values, or keep) before any Escalation.
 
 The cutoffs are calibrated for JEV_MODEL. Re-validate them before changing the pinned version.
+
+LayaClient asks the same questions of Laya, the open-source model that serves Jev's wire protocol from your
+own hardware. The cutoffs were not calibrated for it: measure it (eval.run_jev --judge laya) before relying on it.
 """
 from __future__ import annotations
 
@@ -38,6 +41,9 @@ JEV_URL = 'https://api.typesafe.ai/v1/systemone'
 JEV_MODEL = 'jev-1.13.0'          # pinned: the cutoffs below are only valid for this version
 # your TypeSafe price per million input tokens, for the reported cost; 0 reports no cost
 JEV_PRICE_PER_MTOK = float(os.getenv('JEV_PRICE_PER_MTOK') or 0)
+# Laya reads 512 or 1024 tokens by default and silently drops the rest of the state: a batch of links would be
+# judged without being seen. Ask for the whole window (the server's own cap, LAYA_MAX_TOKEN_BUDGET, defaults to this).
+LAYA_MAX_LEN = int(os.getenv('LAYA_MAX_LEN') or 8192)
 
 BATCH = 20                        # a batch of candidates in one request costs about the same as one
 MAX_NEIGHBOURS = 10               # already-judged links re-scored alongside a batch, answers dropped
@@ -75,6 +81,8 @@ class JevClient:
     """
 
     name = 'jev'
+    url = JEV_URL
+    busy_statuses = (429,)             # back-pressure: wait and ask again
     #: why the breaker is open, for the result and the UI ('no_credits', 'failures', 'no_key')
     unavailable_reason: str | None
 
@@ -99,6 +107,9 @@ class JevClient:
     def cost_usd(self) -> float:
         return round(self.input_tokens * JEV_PRICE_PER_MTOK / 1e6, 6)
 
+    def _body(self, state: dict, questions: dict) -> dict:
+        return {'model': self.model, 'state': state, 'questions': questions}
+
     def ask(self, state: dict, questions: dict) -> dict | None:
         """Return the answers, or None when the request failed (the caller records `unscored`)."""
         if self.open:
@@ -108,8 +119,8 @@ class JevClient:
             started = time.perf_counter()
             try:
                 resp = self._client.post(
-                    JEV_URL, headers={'Authorization': f'Bearer {self.api_key}'},
-                    json={'model': self.model, 'state': state, 'questions': questions},
+                    self.url, headers={'Authorization': f'Bearer {self.api_key}'} if self.api_key else {},
+                    json=self._body(state, questions),
                 )
                 if resp.status_code == 200:
                     body = resp.json()
@@ -127,21 +138,21 @@ class JevClient:
                         self.open = True
                         self.unavailable_reason = 'no_credits' if resp.status_code == 402 else 'auth'
                         self.failures += 1
-                    logger.error('[jev] %s - decision layer unavailable: %s', resp.status_code, resp.text[:200])
+                    logger.error('[%s] %s - decision layer unavailable: %s', self.name, resp.status_code, resp.text[:200])
                     return None
-                if resp.status_code == 429:
+                if resp.status_code in self.busy_statuses:
                     # Rate limited. Waiting is the right answer; counting it as a failure would open
                     # the breaker and send the rest of the crawl down the agent path.
                     rate_limited += 1
                     delay = float(resp.headers.get('retry-after') or min(30.0, 2.0 ** rate_limited))
-                    logger.info('[jev] rate limited, waiting %.1fs (attempt %d)', delay, rate_limited)
+                    logger.info('[%s] rate limited, waiting %.1fs (attempt %d)', self.name, delay, rate_limited)
                     time.sleep(delay)
                     continue
                 if resp.status_code < 500:
-                    logger.warning('[jev] %s %s', resp.status_code, resp.text[:200])
+                    logger.warning('[%s] %s %s', self.name, resp.status_code, resp.text[:200])
                     break
             except httpx.HTTPError as exc:
-                logger.warning('[jev] request failed: %s', exc)
+                logger.warning('[%s] request failed: %s', self.name, exc)
             time.sleep(1.0 * 2 ** attempt)
             attempt += 1
         with self._lock:
@@ -150,7 +161,8 @@ class JevClient:
             if self._consecutive_failures >= BREAKER_FAILURES:
                 self.open = True
                 self.unavailable_reason = self.unavailable_reason or 'failures'
-                logger.warning('[jev] circuit breaker open after %d consecutive failures', self._consecutive_failures)
+                logger.warning('[%s] circuit breaker open after %d consecutive failures', self.name,
+                               self._consecutive_failures)
         return None
 
     # --- the three questions ------------------------------------------------------------------
@@ -261,3 +273,34 @@ class JevClient:
         answers = self.ask({'goal': goal, **page_state},
                            {'hidden': {'type': 'noul', 'instructions': Q_HIDDEN, 'criteria': C_HIDDEN}})
         return answers['hidden']['noul'] if answers else None
+
+
+class LayaClient(JevClient):
+    """The same questions, asked of a Laya server (laya-serve) at LAYA_URL: no TypeSafe key, no cost per token.
+
+    Laya picks its checkpoint per request unless LAYA_MODEL names one (english, multilingual, typed-decisions).
+    """
+
+    name = 'laya'
+    busy_statuses = (429, 503)         # laya-serve answers 503 with Retry-After when every worker is busy
+
+    def __init__(self, url: str | None = None, api_key: str | None = None, *, profile: Profile | None = None,
+                 timeout: float = 120.0):
+        self.checkpoint = os.environ.get('LAYA_MODEL')
+        # '' rather than None: the TypeSafe key must never be sent to a Laya server
+        super().__init__(api_key if api_key is not None else os.environ.get('LAYA_API_KEY', ''), profile=profile,
+                         model=f'laya-{self.checkpoint}' if self.checkpoint else 'laya', timeout=timeout)
+        base = url or os.environ.get('LAYA_URL')
+        self.url = f"{base.rstrip('/')}/v1/systemone" if base else None
+        self.open = not base
+        self.unavailable_reason = None if base else 'no_url'
+
+    @property
+    def cost_usd(self) -> float:
+        return 0.0
+
+    def _body(self, state: dict, questions: dict) -> dict:
+        body = {'state': state, 'questions': questions, 'max_len': LAYA_MAX_LEN}
+        if self.checkpoint:
+            body['model'] = self.checkpoint
+        return body

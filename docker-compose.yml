@@ -13,6 +13,10 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      # a self-hosted Laya server (laya-serve) for judge=laya
+      LAYA_URL: ${LAYA_URL:-}
+      LAYA_API_KEY: ${LAYA_API_KEY:-}
+      LAYA_MODEL: ${LAYA_MODEL:-}
       # set it to require an X-API-Key header on every request; unset, the API is open
       CRAWLER_API_KEY: ${CRAWLER_API_KEY:-}
       # route the crawl's traffic to sites through a proxy (model calls stay direct)

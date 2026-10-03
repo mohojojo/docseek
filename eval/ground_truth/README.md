@@ -85,7 +85,8 @@ Keys are read from the environment or from `.env` at the repository root.
 
 ### run_jev: the judge-driven crawl
 
-Needs what its judge needs: `TYPESAFE_API_KEY` for `--judge jev` (the default when it is set), or an
+Needs what its judge needs: `TYPESAFE_API_KEY` for `--judge jev` (the default when it is set), `LAYA_URL` for
+`--judge laya`, or an
 LLM (`LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY`, or `ANTHROPIC_API_KEY`) for `--judge llm`. Escalations to the
 browsing agent run on the same LLM; without one, pass `--no-escalation`.
 
@@ -96,7 +97,7 @@ browsing agent run on the same LLM; without one, pass `--no-escalation`.
 ```
 
 Useful options: `--max-pages` (default 40), `--max-seconds` (default 180), `--off-domain`,
-`--judge jev|llm`, `--profile` (overrides every file's `profile`), `--frontier tier|rescue|bandit`,
+`--judge jev|laya|llm`, `--profile` (overrides every file's `profile`), `--frontier tier|rescue|bandit`,
 `--recipes <dir>`, `--no-escalation`, `--label <tag>`. `--goal` overrides the file's goal, after
 which the scores mean little.
 
@@ -134,7 +135,7 @@ Scores a judge offline on labelled candidates, with no crawling and no browser.
 .venv/bin/python -m eval.judge_compare my-set.json --judge llm --profile fund-reports --model claude-haiku-4-5
 ```
 
-`--judge jev` needs `TYPESAFE_API_KEY`; `--judge llm` needs an LLM configured as above.
+`--judge jev` needs `TYPESAFE_API_KEY`; `--judge laya` needs `LAYA_URL`; `--judge llm` needs an LLM configured as above.
 `--profile` takes a bundled profile name or a profile path (default `generic`) and applies to
 every goal in the set.
 

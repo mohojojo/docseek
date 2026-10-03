@@ -195,3 +195,36 @@ def test_make_judge_picks_by_configuration(monkeypatch):
     assert isinstance(make_judge('llm', llm=llm), LLMJudge)
     with pytest.raises(JudgeUnavailable):
         make_judge('oracle', llm=llm)
+
+
+# --- Laya: Jev's questions on a self-hosted server ------------------------------------------------------
+def test_make_judge_runs_laya_only_by_name_and_only_with_its_url(monkeypatch):
+    monkeypatch.delenv('TYPESAFE_API_KEY', raising=False)
+    monkeypatch.delenv('LAYA_URL', raising=False)
+    llm = FakeLLM(lambda user: {})
+    with pytest.raises(JudgeUnavailable, match='LAYA_URL'):
+        make_judge('laya', llm=llm)
+    monkeypatch.setenv('LAYA_URL', 'http://laya.example:8000')
+    assert isinstance(make_judge(llm=llm), LLMJudge)                       # a URL alone does not make it the default
+    judge = make_judge('laya', llm=llm)
+    assert isinstance(judge, FallbackJudge) and judge.name == 'laya' and not judge.open
+
+
+def test_laya_posts_to_its_own_server_without_the_typesafe_key(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from docseek.jev import LAYA_MAX_LEN, LayaClient
+
+    monkeypatch.setenv('TYPESAFE_API_KEY', 'typesafe-secret')
+    monkeypatch.setenv('LAYA_URL', 'http://laya.example:8000/')
+    monkeypatch.setenv('LAYA_MODEL', 'multilingual')
+    monkeypatch.delenv('LAYA_API_KEY', raising=False)
+    laya = LayaClient()
+    laya._client = MagicMock()
+    laya._client.post.return_value = MagicMock(status_code=200, json=lambda: {
+        'answers': {'hidden': {'noul': 0.9}}, 'usage': {'input_tokens': 7, 'output_tokens': 0}})
+    assert laya.hides_documents('g', {'text': 'page'}) == 0.9
+    (url,), sent = laya._client.post.call_args
+    assert url == 'http://laya.example:8000/v1/systemone' and sent['headers'] == {}
+    assert sent['json']['model'] == 'multilingual' and sent['json']['max_len'] == LAYA_MAX_LEN
+    assert laya.model == 'laya-multilingual' and laya.cost_usd == 0.0

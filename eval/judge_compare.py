@@ -27,6 +27,9 @@ def make(judge: str, profile_name: str, model: str | None):
     if judge == 'jev':
         from docseek.jev import JevClient
         return JevClient(profile=profile)
+    if judge == 'laya':
+        from docseek.jev import LayaClient
+        return LayaClient(profile=profile)
     llm = make_llm(model=model)
     if llm is None:
         raise SystemExit('no LLM configured (LLM_PROVIDER / LLM_MODEL / LLM_API_KEY or ANTHROPIC_API_KEY)')
@@ -36,7 +39,7 @@ def make(judge: str, profile_name: str, model: str | None):
 def main() -> None:
     ap = argparse.ArgumentParser(prog='eval.judge_compare')
     ap.add_argument('set')
-    ap.add_argument('--judge', choices=['jev', 'llm'], required=True)
+    ap.add_argument('--judge', choices=['jev', 'laya', 'llm'], required=True)
     ap.add_argument('--profile', default='generic', help="'generic', 'fund-reports' or a profile path")
     ap.add_argument('--model', default=None, help='LLM model override for --judge llm')
     ap.add_argument('--label', default='')

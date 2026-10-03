@@ -92,11 +92,12 @@ class DiscoverRequest(BaseModel):
             'tool loop. Omit it to use the judge-driven crawl whenever a judge can run, the agent path otherwise.'
         ),
     )
-    judge: Literal['jev', 'llm'] | None = Field(
+    judge: Literal['jev', 'laya', 'llm'] | None = Field(
         default=None,
         description=(
             "The Relevance judge of the judge-driven crawl. 'jev' is TypeSafe Jev (needs TYPESAFE_API_KEY), with "
-            "the LLM judge taking over if Jev becomes unavailable mid-crawl; 'llm' is any model configured by "
+            "the LLM judge taking over if Jev becomes unavailable mid-crawl; 'laya' is a self-hosted Laya server "
+            "(needs LAYA_URL), with the same fallback; 'llm' is any model configured by "
             'LLM_PROVIDER / LLM_MODEL / LLM_BASE_URL / LLM_API_KEY. Omit it for Jev when its key is set and the '
             'LLM judge otherwise. A judge asked for by name that cannot run is an error, not a silent downgrade.'
         ),
@@ -464,7 +465,7 @@ def delete_patterns(domain: str, x_api_key: str | None = Header(default=None)) -
 class GenerateRequest(BaseModel):
     url: str
     goal: str = Field(min_length=1, max_length=2000)
-    judge: Literal['jev', 'llm'] | None = None
+    judge: Literal['jev', 'laya', 'llm'] | None = None
     profile: str = 'generic'
 
 

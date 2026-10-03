@@ -73,7 +73,7 @@ def main() -> None:
     ap.add_argument('--sites', nargs='*', default=None)
     ap.add_argument('--replays', type=int, default=2)
     ap.add_argument('--regenerate', action='store_true')
-    ap.add_argument('--judge', choices=('jev', 'llm'), default=None)
+    ap.add_argument('--judge', choices=('jev', 'laya', 'llm'), default=None)
     ap.add_argument('--programs-dir', default=str(_HERE / 'programs'))
     ap.add_argument('--label', default='')
     args = ap.parse_args()
