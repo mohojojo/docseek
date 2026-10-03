@@ -15,9 +15,13 @@ Read on every call, so a server picks up a change on its next crawl.
 """
 from __future__ import annotations
 
+import logging
 import os
+import time
 import urllib.request
 from urllib.parse import quote, urlsplit, urlunsplit
+
+logger = logging.getLogger(__name__)
 
 
 def _settings() -> tuple[str, str, str] | None:
@@ -105,3 +109,38 @@ def close_context(context) -> None:
     when we disconnect; closing it could take another crawl's pages on a shared session with it."""
     if not _cdp_url():
         context.close()
+
+
+# A remote browser's service solves Cloudflare's challenge page by itself, but that takes tens of seconds, and a
+# crawl that reads the page at once reads 'Just a moment...'. The challenge's own requests are third-party ones, so
+# a crawl that blocks those has to let CHALLENGE_HOSTS through.
+CHALLENGE_WAIT_S = 60
+CHALLENGE_HOSTS = frozenset({'challenges.cloudflare.com'})
+
+
+def _on_challenge(page) -> bool | None:
+    """Whether the page is Cloudflare's challenge; None while it is navigating, as it does when one clears."""
+    try:
+        return bool(page.evaluate("() => typeof window._cf_chl_opt !== 'undefined'")) \
+            or page.title().lower().startswith('just a moment')
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def wait_out_challenge(page, timeout_s: float = CHALLENGE_WAIT_S) -> bool:
+    """Call after a navigation: waits while the page is Cloudflare's challenge. False when the page is still the
+    challenge: at once on a local Chromium, which does not solve one, after timeout_s on a remote browser."""
+    if not _on_challenge(page):
+        return True
+    if _cdp_url():
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            page.wait_for_timeout(1000)
+            if _on_challenge(page) is False:
+                try:
+                    page.wait_for_load_state('domcontentloaded', timeout=10_000)
+                except Exception:  # noqa: BLE001 - the page behind the challenge is there; let the caller read it
+                    pass
+                return True
+    logger.warning("[challenge] not past Cloudflare's challenge: %s", page.url)
+    return False

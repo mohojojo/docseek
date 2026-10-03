@@ -195,7 +195,12 @@ Both are optional; without them a crawl runs from the host with a local Chromium
   browser the crawl works in the browser's default context and leaves the user agent to the service, which is
   where services apply their fingerprint and CAPTCHA solving. Services that hand out one URL per session
   through their own API (Browserbase, Steel, Hyperbrowser) need a fresh URL per crawl; a service that limits a
-  session to one domain (Bright Data's Browser API) cannot follow a crawl onto a second host.
+  session to one domain (Bright Data's Browser API) cannot follow a crawl onto a second host. On a Cloudflare
+  challenge page ("Just a moment...") the crawl waits up to a minute for the service to solve it. The service
+  has to be told to: Browserless solves only on its stealth route with `solveCaptchas=true`
+  (`wss://production-lon.browserless.io/stealth?token=...&solveCaptchas=true`). The plain HTTP fetches do not
+  go through the remote browser and stay blocked on such a site. `python -m eval.run_antibot` measures what a
+  given setup gets past.
 
 ## HTTP API
 

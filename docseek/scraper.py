@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from playwright.sync_api import sync_playwright
 
 from .models import ANode, ElementRegistry, FullElement
-from .proxy import browser_context, close_context, launch_browser, new_page
+from .proxy import browser_context, close_context, launch_browser, new_page, wait_out_challenge
 
 logger = logging.getLogger(__name__)
 
@@ -937,6 +937,7 @@ def open_page(
         if headless:
             page.route('**/*', _make_cross_origin_script_blocker(url))
         page.goto(url, wait_until=wait_until, timeout=timeout)
+        wait_out_challenge(page)
         page.wait_for_timeout(js_wait_ms)
         try:
             yield page
@@ -1076,6 +1077,7 @@ def fetch_and_build_tree(
         if headless:
             page.route('**/*', _make_cross_origin_script_blocker(url))
         page.goto(url, wait_until=wait_until, timeout=timeout)
+        wait_out_challenge(page)
         page.wait_for_timeout(js_wait_ms)
 
         try:

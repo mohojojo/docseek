@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 import httpx
 
 from ..jev_crawl import _HARVEST_JS, BLOCKED_RESOURCES
-from ..proxy import http_proxy, launch_browser, new_page
+from ..proxy import http_proxy, launch_browser, new_page, wait_out_challenge
 from ..reach import bare_host, is_safe_url, robots_allows
 from ..scraper import _DEFAULT_USER_AGENT, _try_accept_cookies
 from .sandbox import FetchRefused
@@ -159,6 +159,7 @@ class Fetcher:
                 if r.request.resource_type in ('xhr', 'fetch') and len(calls) < 80 else None)
             try:
                 resp = page.goto(url, wait_until='domcontentloaded', timeout=45_000)
+                wait_out_challenge(page)
                 page.wait_for_timeout(RENDER_WAIT_MS)
                 _try_accept_cookies(page)
                 self.check(page.url)
@@ -183,6 +184,7 @@ class Fetcher:
             done = []
             try:
                 page.goto(url, wait_until='domcontentloaded', timeout=45_000)
+                wait_out_challenge(page)
                 page.wait_for_timeout(RENDER_WAIT_MS)
                 _try_accept_cookies(page)
                 self.check(page.url)

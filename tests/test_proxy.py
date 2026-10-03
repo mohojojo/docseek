@@ -147,3 +147,42 @@ def test_a_remote_browser_without_a_context_gets_a_plain_one(monkeypatch):
     monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
     browser = FakeBrowser()
     assert proxy.browser_context(browser, user_agent='docseek').options == {}
+
+
+class ChallengePage:
+    """A page that is Cloudflare's challenge for its first `challenged` looks."""
+    url = 'https://site.example/'
+
+    def __init__(self, challenged):
+        self.challenged, self.waited = challenged, 0
+
+    def evaluate(self, script):
+        self.challenged -= 1
+        return self.challenged >= 0
+
+    def title(self):
+        return 'Site'
+
+    def wait_for_timeout(self, ms):
+        self.waited += ms
+
+    def wait_for_load_state(self, state, timeout):
+        pass
+
+
+def test_an_ordinary_page_is_not_waited_on(monkeypatch):
+    monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
+    page = ChallengePage(challenged=0)
+    assert proxy.wait_out_challenge(page) and page.waited == 0
+
+
+def test_a_remote_browser_is_given_time_to_solve_the_challenge(monkeypatch):
+    monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
+    page = ChallengePage(challenged=3)
+    assert proxy.wait_out_challenge(page) and page.waited == 3000
+    assert not proxy.wait_out_challenge(ChallengePage(challenged=99), timeout_s=0)     # it never cleared
+
+
+def test_a_local_browser_does_not_wait_on_a_challenge_it_cannot_solve():
+    page = ChallengePage(challenged=99)
+    assert not proxy.wait_out_challenge(page) and page.waited == 0

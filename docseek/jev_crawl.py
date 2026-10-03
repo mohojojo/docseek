@@ -39,7 +39,9 @@ from .json_mining import MAX_JSON_BYTES, candidates_from_json
 from .judge import RelevanceJudge, make_judge, verdict_for
 from .llm import LLMClient
 from .models import AgenticCrawlResult, AgenticDownload
-from .proxy import browser_context, close_context, http_proxy, launch_browser
+from .proxy import (
+    CHALLENGE_HOSTS, browser_context, close_context, http_proxy, launch_browser, wait_out_challenge,
+)
 from .reach import OffDomainPolicy, bare_host, is_crawlable  # noqa: F401 - re-exported
 from .recipes import RecipeStore, recipe_from_steps, replay as replay_recipe
 from .series import date_of, period_of  # noqa: F401 - re-exported: the period Facet is read by docseek.series
@@ -725,7 +727,8 @@ def jev_crawl(
 
             def route(route_obj, request):
                 kind = request.resource_type
-                third_party = bare_host(urlparse(request.url).netloc) not in policy.first_party_hosts
+                host = urlparse(request.url).netloc
+                third_party = bare_host(host) not in policy.first_party_hosts and host not in CHALLENGE_HOSTS
                 if kind in BLOCKED_RESOURCES \
                         or (third_party and kind in ('xhr', 'fetch', 'ping', 'beacon', 'eventsource')) \
                         or (kind == 'script' and urlparse(request.url).netloc in _TRACKING_SCRIPT_HOSTS):
@@ -908,6 +911,7 @@ def jev_crawl(
         try:
             sess.json_bodies.clear()
             sess.page.goto(url, wait_until='domcontentloaded', timeout=30_000)
+            wait_out_challenge(sess.page)
             if not sess.cookies_done:
                 sess.cookies_done = True
                 _try_accept_cookies(sess.page, wait_ms=500)
