@@ -186,3 +186,82 @@ def test_a_remote_browser_is_given_time_to_solve_the_challenge(monkeypatch):
 def test_a_local_browser_does_not_wait_on_a_challenge_it_cannot_solve():
     page = ChallengePage(challenged=99)
     assert not proxy.wait_out_challenge(page) and page.waited == 0
+
+
+class StealthChromium(FakeChromium):
+    """Chrome as Patchright launches it: headless, it names itself HeadlessChrome."""
+    class Probe:
+        def new_page(self):
+            return self
+
+        def evaluate(self, script):
+            return 'Mozilla/5.0 (Macintosh) HeadlessChrome/154.0.0.0 Safari/537.36'
+
+        def close(self):
+            pass
+
+    def launch(self, **kwargs):
+        self.calls.append(('launch', kwargs))
+        return self.Probe()
+
+
+def test_browser_stealth_launches_chrome_under_its_own_user_agent_without_headless(monkeypatch):
+    monkeypatch.setenv('BROWSER_STEALTH', '1')
+    monkeypatch.setenv('PROXY_SERVER', 'http://pr.example:7777')
+    monkeypatch.setattr(proxy, '_stealth_user_agent', None)
+    pw = FakePlaywright()
+    pw.chromium = StealthChromium()
+    proxy.launch_browser(pw)
+    proxy.launch_browser(pw)
+    launches = [kwargs for _, kwargs in pw.chromium.calls]
+    assert len(launches) == 3                                # the user agent is asked of the browser once
+    assert all(kwargs['channel'] == 'chrome' for kwargs in launches)
+    assert '--user-agent=Mozilla/5.0 (Macintosh) Chrome/154.0.0.0 Safari/537.36' in launches[-1]['args']
+    assert launches[-1]['proxy'] == {'server': 'http://pr.example:7777'}
+
+    browser = FakeBrowser()
+    assert proxy.browser_context(browser, user_agent='docseek', accept_downloads=True).options == {
+        'accept_downloads': True}
+    assert proxy.new_page(browser, 'docseek') == ('own page', {})
+
+
+def test_a_remote_browser_wins_over_browser_stealth(monkeypatch):
+    monkeypatch.setenv('BROWSER_STEALTH', '1')
+    monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
+    pw = FakePlaywright()
+    assert proxy.launch_browser(pw) == 'remote'
+
+
+def test_browser_stealth_without_patchright_says_what_to_install(monkeypatch):
+    monkeypatch.setenv('BROWSER_STEALTH', '1')
+    monkeypatch.setitem(__import__('sys').modules, 'patchright.sync_api', None)
+    with pytest.raises(RuntimeError, match='patchright install chrome'):
+        proxy.sync_playwright()
+
+
+class CheckboxPage(ChallengePage):
+    """A challenge that stays until its checkbox is clicked."""
+    class Frame:
+        url = 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/'
+
+        def frame_element(self):
+            return self
+
+        def bounding_box(self):
+            return {'x': 100, 'y': 200, 'width': 300, 'height': 60}
+
+    def __init__(self):
+        super().__init__(challenged=10 ** 6)
+        self.frames, self.mouse, self.clicks = [self.Frame()], self, []
+
+    def click(self, x, y):
+        self.clicks.append((x, y))
+        self.challenged = 0
+
+
+def test_browser_stealth_clicks_the_challenge_checkbox(monkeypatch):
+    monkeypatch.setenv('BROWSER_STEALTH', '1')
+    monkeypatch.setattr(proxy, 'CHECKBOX_AFTER_S', 0)
+    page = CheckboxPage()
+    assert proxy.wait_out_challenge(page)
+    assert page.clicks == [(130, 230)]

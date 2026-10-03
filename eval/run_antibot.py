@@ -5,12 +5,16 @@ environment sets.
     PROXY_SERVER=http://... .venv/bin/python -m eval.run_antibot --label residential
     BROWSER_CDP_URL=wss://... .venv/bin/python -m eval.run_antibot --label browserless --urls https://site.example/
 
-One run measures one mode (direct, PROXY_SERVER or BROWSER_CDP_URL); compare the reports of several runs.
+    BROWSER_STEALTH=1 .venv/bin/python -m eval.run_antibot --label stealth
+
+One run measures one mode (direct, PROXY_SERVER, BROWSER_CDP_URL or BROWSER_STEALTH); compare the reports of
+several runs.
 Every URL is fetched three ways, each browser one in a fresh browser, so that a cf_clearance cookie won by one
 does not help the next:
 
     http          a plain httpx GET: the probes, API mining and the codegen fetcher
-    browser       the crawl's browser with nothing blocked: the agent's pages
+    browser       the crawl's browser with nothing blocked, waiting on a challenge as the crawl does
+                  (docseek.proxy.wait_out_challenge): the agent's pages
     browser+jev   the same under the Jev crawl's request blocking (no images, media or fonts, no third-party
                   XHR), which is what a challenge has to solve itself under there
 
@@ -30,10 +34,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from playwright.sync_api import sync_playwright
-
 from docseek.jev_crawl import BLOCKED_RESOURCES
-from docseek.proxy import CHALLENGE_HOSTS, browser_context, close_context, http_proxy, launch_browser
+from docseek.proxy import (
+    CHALLENGE_HOSTS, browser_context, close_context, http_proxy, launch_browser, sync_playwright, wait_out_challenge,
+)
 from docseek.reach import bare_host
 from docseek.scraper import _DEFAULT_USER_AGENT, _TRACKING_SCRIPT_HOSTS
 
@@ -52,7 +56,8 @@ CHALLENGE_TITLE = 'just a moment'           # 'Attention Required!' is a block p
 
 def mode() -> str:
     """The network mode this run measures, without the addresses: they carry credentials."""
-    parts = ['remote browser'] if os.getenv('BROWSER_CDP_URL') else ['local browser']
+    parts = ['remote browser'] if os.getenv('BROWSER_CDP_URL') \
+        else ['stealth browser'] if os.getenv('BROWSER_STEALTH') else ['local browser']
     parts.append('proxy' if os.getenv('PROXY_SERVER') else 'direct')
     return ', '.join(parts)
 
@@ -80,7 +85,7 @@ def check_http(url: str, user_agent: str) -> dict:
 
 def _challenged(page) -> bool:
     try:
-        return page.evaluate("() => typeof window._cf_chl_opt !== 'undefined'") \
+        return page.evaluate("() => [...document.scripts].some(s => s.textContent.includes('_cf_chl_opt'))") \
             or page.title().lower().startswith(CHALLENGE_TITLE)
     except Exception:  # noqa: BLE001 - the page is navigating, as it does when a challenge clears: look again
         return True
@@ -116,10 +121,9 @@ def check_browser(url: str, user_agent: str, *, jev_routes: bool, wait_s: float,
                     if r.request.is_navigation_request() and r.frame == page.main_frame else None)
             started = time.monotonic()
             page.goto(url, wait_until='domcontentloaded', timeout=60_000)
-            first = last = _challenged(page)
-            while last and time.monotonic() - started < wait_s:
-                page.wait_for_timeout(1000)
-                last = _challenged(page)
+            first = _challenged(page)
+            wait_out_challenge(page, wait_s)
+            last = _challenged(page)
             result = {
                 'outcome': outcome(first, last, documents[-1].status),
                 'status': documents[0].status,

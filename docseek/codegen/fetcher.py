@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 import httpx
 
 from ..jev_crawl import _HARVEST_JS, BLOCKED_RESOURCES
-from ..proxy import http_proxy, launch_browser, new_page, wait_out_challenge
+from ..proxy import http_proxy, launch_browser, new_page, sync_playwright, wait_out_challenge
 from ..reach import bare_host, is_safe_url, robots_allows
 from ..scraper import _DEFAULT_USER_AGENT, _try_accept_cookies
 from .sandbox import FetchRefused
@@ -137,7 +137,6 @@ class Fetcher:
             raise FetchRefused(f'render budget of {self.max_renders} spent')
         self.renders += 1
         if self._browser is None:
-            from playwright.sync_api import sync_playwright
             self._pw = sync_playwright().start()
             self._browser = launch_browser(self._pw)
         page = new_page(self._browser, self.user_agent)

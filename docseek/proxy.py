@@ -10,6 +10,9 @@ variables and not HTTPS_PROXY, which httpx, urllib and the provider SDKs would a
     BROWSER_CDP_URL  wss://... of a remote browser (Oxylabs Headless Browser, Browserless, Browserbase, ...)
                      used instead of a local Chromium. It brings its own network, so the proxy is not applied
                      to it; the plain HTTP fetches still use the proxy.
+    BROWSER_STEALTH  1: the local browser is Google Chrome driven by Patchright (Playwright with the automation
+                     tells patched out), which gets past Cloudflare's challenge page from the host's own IP or
+                     the proxy's. Needs the `stealth` extra and an installed Chrome. BROWSER_CDP_URL wins.
 
 Read on every call, so a server picks up a change on its next crawl.
 """
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
 import urllib.request
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -71,11 +75,51 @@ def _cdp_url() -> str:
     return (os.getenv('BROWSER_CDP_URL') or '').strip()
 
 
+def _stealth() -> bool:
+    return (os.getenv('BROWSER_STEALTH') or '').strip().lower() in ('1', 'true', 'yes') and not _cdp_url()
+
+
+def sync_playwright():
+    """Playwright's entry point, or Patchright's under BROWSER_STEALTH: the same API."""
+    if not _stealth():
+        from playwright.sync_api import sync_playwright as start
+        return start()
+    try:
+        from patchright.sync_api import sync_playwright as start
+    except ImportError as exc:
+        raise RuntimeError('BROWSER_STEALTH needs Patchright and Google Chrome: '
+                           'pip install "docseek[stealth]" && patchright install chrome') from exc
+    return start()
+
+
+_stealth_user_agent: str | None = None
+
+
+def _headless_user_agent(playwright) -> str:
+    """Chrome's own user agent without the 'Headless' that headless mode puts in it, which alone fails a challenge.
+    Asked of the browser once per process, so that it always names the version that is installed."""
+    global _stealth_user_agent
+    if _stealth_user_agent is None:
+        browser = playwright.chromium.launch(headless=True, channel='chrome')
+        try:
+            user_agent = browser.new_page().evaluate('() => navigator.userAgent')
+        finally:
+            browser.close()
+        _stealth_user_agent = user_agent.replace('HeadlessChrome', 'Chrome')
+    return _stealth_user_agent
+
+
 def launch_browser(playwright, headless: bool = True):
-    """The crawl's browser: the remote one at BROWSER_CDP_URL, or a local Chromium through the proxy."""
+    """The crawl's browser: the remote one at BROWSER_CDP_URL, or a local one through the proxy - Chromium, or
+    Google Chrome under BROWSER_STEALTH (Patchright's Chromium does not pass a challenge, Chrome does)."""
     cdp_url = _cdp_url()
     if cdp_url:
         return playwright.chromium.connect_over_cdp(cdp_url)
+    if _stealth():
+        args = [f'--user-agent={_headless_user_agent(playwright)}'] if headless else []
+        if headless and sys.platform.startswith('linux'):
+            args += ['--no-sandbox', '--disable-setuid-sandbox']
+        return playwright.chromium.launch(headless=headless, channel='chrome', args=args, proxy=browser_proxy())
     # --no-sandbox / --disable-setuid-sandbox are Linux/Docker flags; skip in headed mode.
     args = ['--no-sandbox', '--disable-setuid-sandbox'] if headless else []
     return playwright.chromium.launch(headless=headless, args=args, proxy=browser_proxy())
@@ -88,6 +132,8 @@ def launch_browser(playwright, headless: bool = True):
 def browser_context(browser, **options):
     """A context to crawl in: a new one with `options` locally, the remote browser's default context otherwise.
     There only storage_state's cookies are carried over; downloads are accepted by default either way."""
+    if _stealth():
+        options.pop('user_agent', None)     # Chrome's own: a claimed user agent the browser does not match is a tell
     if not _cdp_url():
         return browser.new_context(**options)
     context = browser.contexts[0] if browser.contexts else browser.new_context()
@@ -98,7 +144,10 @@ def browser_context(browser, **options):
 
 
 def new_page(browser, user_agent: str):
-    """A page with our user agent locally; on a remote browser, a page in its default context."""
+    """A page with our user agent locally (Chrome's own under BROWSER_STEALTH); on a remote browser, a page in
+    its default context."""
+    if _stealth():
+        return browser.new_page()
     if not _cdp_url():
         return browser.new_page(user_agent=user_agent)
     return browser_context(browser).new_page()
@@ -111,31 +160,56 @@ def close_context(context) -> None:
         context.close()
 
 
-# A remote browser's service solves Cloudflare's challenge page by itself, but that takes tens of seconds, and a
-# crawl that reads the page at once reads 'Just a moment...'. The challenge's own requests are third-party ones, so
-# a crawl that blocks those has to let CHALLENGE_HOSTS through.
+# A remote browser's service solves Cloudflare's challenge page by itself, and Chrome under BROWSER_STEALTH passes
+# it, but either takes seconds to tens of seconds, and a crawl that reads the page at once reads 'Just a moment...'.
+# The challenge's own requests are third-party ones, so a crawl that blocks those has to let CHALLENGE_HOSTS through.
 CHALLENGE_WAIT_S = 60
 CHALLENGE_HOSTS = frozenset({'challenges.cloudflare.com'})
+CHECKBOX_AFTER_S = 4        # most challenges clear unasked within this; one that has not is showing its checkbox
+CHECKBOX_CLICKS = 3
+# The challenge's settings sit in an inline script. Read from the DOM: Patchright evaluates in a world of its own,
+# where the page's window._cf_chl_opt does not exist.
+_ON_CHALLENGE_JS = "() => [...document.scripts].some(script => script.textContent.includes('_cf_chl_opt'))"
 
 
 def _on_challenge(page) -> bool | None:
     """Whether the page is Cloudflare's challenge; None while it is navigating, as it does when one clears."""
     try:
-        return bool(page.evaluate("() => typeof window._cf_chl_opt !== 'undefined'")) \
-            or page.title().lower().startswith('just a moment')
+        return bool(page.evaluate(_ON_CHALLENGE_JS)) or page.title().lower().startswith('just a moment')
     except Exception:  # noqa: BLE001
         return None
 
 
+def _click_checkbox(page) -> bool:
+    """Click the challenge's 'Verify you are human' checkbox, which sits at the left of its iframe."""
+    for frame in page.frames:
+        if urlsplit(frame.url).netloc not in CHALLENGE_HOSTS:
+            continue
+        try:
+            box = frame.frame_element().bounding_box()
+            if box and box['width'] > 100:              # the widget, not one of the challenge's hidden frames
+                page.mouse.click(box['x'] + 30, box['y'] + box['height'] / 2)
+                return True
+        except Exception:  # noqa: BLE001 - the frame went away: the challenge is moving on
+            pass
+    return False
+
+
 def wait_out_challenge(page, timeout_s: float = CHALLENGE_WAIT_S) -> bool:
-    """Call after a navigation: waits while the page is Cloudflare's challenge. False when the page is still the
-    challenge: at once on a local Chromium, which does not solve one, after timeout_s on a remote browser."""
+    """Call after a navigation: waits while the page is Cloudflare's challenge, and under BROWSER_STEALTH clicks
+    its checkbox when it shows one. False when the page is still the challenge: at once on a plain local Chromium,
+    which does not pass one, after timeout_s otherwise."""
     if not _on_challenge(page):
         return True
-    if _cdp_url():
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
+    if _cdp_url() or _stealth():
+        began = time.monotonic()
+        clicks = 0
+        while time.monotonic() - began < timeout_s:
             page.wait_for_timeout(1000)
+            if _stealth() and clicks < CHECKBOX_CLICKS and time.monotonic() - began >= CHECKBOX_AFTER_S * (clicks + 1) \
+                    and _on_challenge(page) and _click_checkbox(page):
+                clicks += 1
+                continue
             if _on_challenge(page) is False:
                 try:
                     page.wait_for_load_state('domcontentloaded', timeout=10_000)

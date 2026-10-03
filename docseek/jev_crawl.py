@@ -26,7 +26,6 @@ from typing import Callable
 from urllib.parse import parse_qsl, urlencode, urlparse
 
 import httpx
-from playwright.sync_api import sync_playwright
 
 from .agent import (
     _SYSTEM_BLOCKS, agent_llm, _is_binary, _is_safe_url, _strip_fragment, _url_allowed_by_robots, _visit_page,
@@ -40,7 +39,7 @@ from .judge import RelevanceJudge, make_judge, verdict_for
 from .llm import LLMClient
 from .models import AgenticCrawlResult, AgenticDownload
 from .proxy import (
-    CHALLENGE_HOSTS, browser_context, close_context, http_proxy, launch_browser, wait_out_challenge,
+    CHALLENGE_HOSTS, browser_context, close_context, http_proxy, launch_browser, sync_playwright, wait_out_challenge,
 )
 from .reach import OffDomainPolicy, bare_host, is_crawlable  # noqa: F401 - re-exported
 from .recipes import RecipeStore, recipe_from_steps, replay as replay_recipe

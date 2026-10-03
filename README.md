@@ -181,10 +181,11 @@ Health cannot tell when a program confidently returns the wrong slice of a site;
 | `PROXY_SERVER` | Send the crawl's traffic to the site (browser, HTTP fetches, probes, robots.txt, sitemaps) through this proxy, e.g. `http://pr.example.com:7777`. Model provider calls do not use it. Unset: direct. |
 | `PROXY_USERNAME`, `PROXY_PASSWORD` | Credentials for `PROXY_SERVER`, if it needs them. Providers that pick the exit country from the username work as they are. |
 | `BROWSER_CDP_URL` | `wss://...` of a remote browser (Oxylabs Headless Browser, Browserless, Browserbase, ...) to crawl with instead of a local Chromium - for sites that need CAPTCHA solving or a residential fingerprint. `PROXY_SERVER` does not apply to it; the plain HTTP fetches still use the proxy. |
+| `BROWSER_STEALTH` | `1`: crawl with a local Google Chrome driven by Patchright, which passes Cloudflare's challenge page. Needs the `stealth` extra and Chrome. `BROWSER_CDP_URL` wins when both are set. |
 
 ### Proxies and remote browsers
 
-Both are optional; without them a crawl runs from the host with a local Chromium.
+All are optional; without them a crawl runs from the host with a local Chromium.
 
 - **`PROXY_SERVER`** takes any ordinary HTTP(S) proxy, residential ones included. Put a provider's country or
   sticky-session options in `PROXY_USERNAME` as it documents them. Prefer a sticky session: a site that ties
@@ -199,8 +200,16 @@ Both are optional; without them a crawl runs from the host with a local Chromium
   challenge page ("Just a moment...") the crawl waits up to a minute for the service to solve it. The service
   has to be told to: Browserless solves only on its stealth route with `solveCaptchas=true`
   (`wss://production-lon.browserless.io/stealth?token=...&solveCaptchas=true`). The plain HTTP fetches do not
-  go through the remote browser and stay blocked on such a site. `python -m eval.run_antibot` measures what a
-  given setup gets past.
+  go through the remote browser and stay blocked on such a site.
+- **`BROWSER_STEALTH=1`** gets past the same challenge page without a service: the local browser becomes Google
+  Chrome driven by [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python), a Playwright build
+  with the automation tells patched out, and the crawl clicks the challenge's checkbox when it shows one. Install
+  it with `pip install "docseek[stealth]"` and `patchright install chrome` (Chrome itself: Patchright's bundled
+  Chromium does not pass). The site sees the host's IP, or `PROXY_SERVER`'s; an IP that Cloudflare blocks
+  outright stays blocked. It works until Cloudflare's detection moves on, so measure before relying on it.
+  The Docker image ships Chromium only.
+
+`python -m eval.run_antibot` measures what a given setup gets past.
 
 ## HTTP API
 
