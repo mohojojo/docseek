@@ -20,3 +20,6 @@ eval/ground_truth/*.json
 
 # generated programs from eval runs
 eval/programs/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
