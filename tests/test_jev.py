@@ -789,9 +789,38 @@ class TestPagingIdentity:
         assert paging_identity('https://site-es.example/fondo.aspx?nif=V1') != paging_identity('https://site-es.example/fondo.aspx?nif=V2')
         assert paging_identity('https://site-hu.example/?module=news&action=show&nid=1') != paging_identity('https://site-hu.example/?module=news&action=show&nid=2')
 
+    def test_the_next_page_of_a_listing_behind_a_kept_facet_is_not_the_unfiltered_listing(self):
+        from docseek.jev_crawl import paging_identity
+        keep = frozenset({('doc_types[]', '111')})      # what the form submitted; its pagination writes [0]
+        filtered = paging_identity('https://site-lv.example/en/?view=docs&doc_types[0]=111&start=20', keep)
+        assert filtered == paging_identity('https://site-lv.example/en/?view=docs&doc_types%5B%5D=111&start=40', keep)
+        assert filtered != paging_identity('https://site-lv.example/en/?view=docs&start=20', keep)
+        assert filtered != paging_identity('https://site-lv.example/en/?view=docs&doc_types[0]=112&start=20', keep)
+
     def test_parameter_order_does_not_matter(self):
         from docseek.jev_crawl import paging_identity
         assert paging_identity('https://site-es.example/f.aspx?nif=V1&vista=5') == paging_identity('https://site-es.example/f.aspx?vista=5&nif=V1')
+
+
+class TestBracketFacets:
+    """A bracketed parameter sets a facet and is not followed, except as the next page of a listing already behind it."""
+
+    FILTERED = 'https://site-lv.example/en/?doc_issuer=&SEARCH=Search&doc_types%5B%5D=111'
+
+    def test_the_next_page_of_a_filtered_listing_keeps_its_parents_facet(self):
+        from docseek.jev_crawl import keeps_parent_facets
+        assert keeps_parent_facets('https://site-lv.example/en/?view=docs&doc_types[0]=111&start=20', self.FILTERED)
+
+    def test_a_link_that_sets_a_facet_its_parent_lacks_is_not_followed(self):
+        from docseek.jev_crawl import keeps_parent_facets
+        assert not keeps_parent_facets('https://site-lv.example/en/?view=docs&doc_types[0]=112', self.FILTERED)
+        assert not keeps_parent_facets('https://site-lv.example/en/?view=docs&doc_types[0]=111&start=20',
+                                       'https://site-lv.example/en/?view=docs')
+        assert not keeps_parent_facets('https://site-lv.example/en/?view=docs&doc_types[0]=111', None)
+
+    def test_a_bracket_outside_a_parameter_name_is_not_a_facet(self):
+        from docseek.jev_crawl import keeps_parent_facets
+        assert not keeps_parent_facets('https://site-lv.example/files/[id]/view', self.FILTERED)
 
 
 class TestYearFacet:

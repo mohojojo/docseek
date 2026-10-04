@@ -33,6 +33,7 @@ from .agent import (
 )
 from .api_mining import mine_documents
 from .document_probe import DocumentProbe
+from .form_plan import apply_plan, plan_form, read_form
 from .frontier import Frontier, frontier_key  # noqa: F401 - frontier_key is re-exported
 from .json_mining import MAX_JSON_BYTES, candidates_from_json
 from .judge import RelevanceJudge, make_judge, verdict_for
@@ -54,6 +55,7 @@ logger = logging.getLogger(__name__)
 AGENT_STEPS_PER_ESCALATION = 20
 AGENT_TOKEN_CAP = 300_000          # per crawl
 MAX_FILTERED_LISTING_ESCALATIONS = 3   # enough for a filtered listing; more added no recall
+MAX_FORM_PLANS = 4                 # a site has one filter form, met again on a few of its listing pages
 THIN_LISTING_DOCUMENTS = 5             # a filter that hides items leaves few visible, where an
                                        # unfiltered listing shows many
 FILTERED_LISTING_AT = 0.7          # a listing behind a filter shows its newest item and hides the rest,
@@ -471,6 +473,28 @@ def should_stop_for_no_progress(stale_pages: int, pages_done: int, max_pages: in
     return stale_pages >= STALE_PAGES_STOP and spent >= STALE_MIN_BUDGET_FRACTION
 
 
+def _facet_key(key: str) -> str:
+    """`types[0]` and `types[]` are one parameter: a form submits the second, its pagination links carry the first."""
+    return re.sub(r'\[\d*\]', '[]', key)
+
+
+def _bracket_facets(url: str) -> set[tuple[str, str]]:
+    return {(_facet_key(k), v) for k, v in parse_qsl(urlparse(url).query, keep_blank_values=True) if '[' in k}
+
+
+def _listing_facets(url: str) -> frozenset[tuple[str, str]]:
+    """The facets a listing URL is narrowed to: its filter parameters that carry a value."""
+    return frozenset((_facet_key(k), v) for k, v in parse_qsl(urlparse(url).query) if _FACET_PARAM.search(k))
+
+
+def keeps_parent_facets(url: str, parent: str | None) -> bool:
+    """A link with a bracketed parameter (`types[0]=111`) sets a facet, and a listing's facets multiply into more
+    pages than any budget, so such links are not followed. The exception is the next page of a listing that
+    is already behind that facet: every bracketed parameter it carries is one its parent page carries too."""
+    facets = _bracket_facets(url)
+    return bool(facets) and parent is not None and facets <= _bracket_facets(parent)
+
+
 def sitemap_page_urls(urls: list[str]) -> list[str]:
     """Sitemap page URLs worth a page-kind question: content paths only, capped."""
     keep = [u for u in urls
@@ -482,12 +506,13 @@ def sitemap_page_urls(urls: list[str]) -> list[str]:
 def paging_identity(url: str, keep: frozenset[tuple[str, str]] = frozenset()) -> str:
     """What a URL is, once its paging and facet parameters are dropped: the key the variant cap counts on.
 
-    `keep` is the seed's own facets. A caller who seeds a filtered listing means that listing, so a page
-    that shares the seed's filter (its next page) keeps a distinct identity from the unfiltered one.
+    `keep` is the seed's own facets, and those of a filter the crawl set itself. A caller who seeds a filtered
+    listing means that listing, so a page that shares the seed's filter (its next page) keeps a distinct
+    identity from the unfiltered one.
     """
     parsed = urlparse(url)
-    stable = sorted((k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True)
-                    if (k, v) in keep or (not _PAGING_PARAM.search(k) and not _FACET_PARAM.search(k)))
+    stable = sorted((_facet_key(k), v) for k, v in parse_qsl(parsed.query, keep_blank_values=True)
+                    if (_facet_key(k), v) in keep or (not _PAGING_PARAM.search(k) and not _FACET_PARAM.search(k)))
     return parsed.path.rstrip('/').lower() + ('?' + urlencode(stable) if stable else '')
 
 
@@ -600,13 +625,16 @@ def jev_crawl(
             accepted += verdict == 'accepted'
         return accepted, kept
 
-    def add_pages(links: list[dict], depth: int, parent: str | None = None) -> int:
-        """Classify unseen page links and put them in the Frontier."""
+    def add_pages(links: list[dict], depth: int, parent: str | None = None, found_on: str | None = None) -> int:
+        """Classify unseen page links and put them in the Frontier. `found_on` is the URL the links were read
+        from when that is not `parent`: a form that was set loads its own URL, and its links carry its facets."""
         with lock:
             fresh, seen = [], set()
             for c in links:
                 key = canonical(c['url'])
-                if key in classified or key in visited or key in seen or '[' in c['url']:
+                if key in classified or key in visited or key in seen:
+                    continue
+                if '[' in c['url'] and not keeps_parent_facets(c['url'], found_on or parent):
                     continue
                 if not _is_safe_url(c['url']):
                     guard['unsafe_urls'] += 1
@@ -627,7 +655,7 @@ def jev_crawl(
         queued = 0
         with lock:
             for c, (kind, probability) in zip(fresh, kinds):
-                path = paging_identity(c['url'], seed_facets)
+                path = paging_identity(c['url'], frozenset(kept_facets))
                 variants = paths_queued[path]
                 if variants >= MAX_VARIANTS_PER_PATH:
                     continue                      # the rest is the same page, paginated
@@ -687,8 +715,9 @@ def jev_crawl(
     add_candidates(sitemap_docs, 'sitemap', final_url, 'sitemap')
     # the seed's own facets are the caller's intent (a date range, a document type): pages that share
     # them are the listing the caller asked for, not variants of the unfiltered one
-    seed_facets = frozenset((k, v) for k, v in parse_qsl(urlparse(final_url).query, keep_blank_values=True)
-                            if _FACET_PARAM.search(k) and not _PAGING_PARAM.search(k))
+    # (a filter the crawl sets itself adds its facets here: see filter_reveal)
+    kept_facets = {(_facet_key(k), v) for k, v in parse_qsl(urlparse(final_url).query, keep_blank_values=True)
+                   if _FACET_PARAM.search(k) and not _PAGING_PARAM.search(k)}
     frontier.add_seed(final_url)
     # Every sitemap document is judged, but only the first N page URLs are worth a question: scoring a large
     # sitemap's page URLs once took a big share of the time budget and found nothing.
@@ -757,28 +786,95 @@ def jev_crawl(
             sess.page.wait_for_timeout(150)
         return last
 
-    def filter_reveal(sess, url: str, title: str, harvested: list[str], shown: set[str]) -> tuple[list[dict], dict]:
-        """Set the filter values Jev picks, in code, and harvest again. Returns the documents that
-        appeared and what was done; nothing appears when there is no filter or Jev keeps them all."""
+    def filter_reveal(sess, url: str, title: str, harvested: list[str],
+                      shown: set[str]) -> tuple[list[dict], list[dict], dict]:
+        """Set the filter values Jev picks, in code, and harvest again. Returns the documents and the page
+        links that appeared and what was done; nothing appears when there is no filter or Jev keeps them all.
+
+        The page links matter where a listing links each filing's own page and the files sit there: setting
+        the filter reveals no document, only the pages that hold them."""
         filters = sess.page.evaluate(_FILTERS_JS)
         info: dict = {'filters': len(filters)}
         if not filters:
-            return [], info
+            return [], [], info
         picks = judge.filter_values(goal, {'page_url': url, 'page_title': title,
                                          'documents_listed_now': harvested[:15]}, filters)
         label = {f['id']: f['label'] or f['id'] for f in filters}
         info['set'] = {label[fid]: {'value': value, 'p': round(p, 2)} for fid, (value, p) in picks.items()}
         if not picks:
-            return [], info
+            return [], [], info
         for fid, (value, _) in picks.items():
             sess.page.wait_for_timeout(150)
             select_option_anywhere(sess.page, fid, value, 1500)
         info['submit'] = sess.page.evaluate(_FILTER_SUBMIT_JS)
         if info['submit']:
             sess.page.locator('[data-ml-id="jf-submit"]').first.click(timeout=5000)
-        settle(sess, 8000)
-        again, _ = split_links(sess.page.evaluate(_HARVEST_JS), url)
-        return [d for d in again if d['url'] not in shown], info
+        return *revealed_since(sess, url, shown), info
+
+    def revealed_since(sess, url: str, shown: set[str]) -> tuple[list[dict], list[dict]]:
+        """The documents and page links a page shows now that it did not before a filter or a form was set."""
+        for _ in range(3):
+            # a form that submits loads a new page, a moment after the click; one that sets itself in place loads nothing
+            sess.page.wait_for_timeout(400)
+            try:
+                sess.page.wait_for_load_state('domcontentloaded', timeout=8000)
+                settle(sess, 8000)
+                break
+            except Exception as exc:  # noqa: BLE001 - asked mid-navigation: wait for the new page and ask again
+                logger.debug('[jev] page still loading after a filter: %s', exc)
+        if sess.page.url != url:
+            # the crawl is behind this filter now, as if it had been seeded there: its next pages are a
+            # listing of their own, not more pages of the unfiltered one
+            with lock:
+                kept_facets.update(_listing_facets(sess.page.url))
+        again, pages_now = split_links(sess.page.evaluate(_HARVEST_JS), sess.page.url)
+        return [d for d in again if d['url'] not in shown], [p for p in pages_now if p['url'] not in shown]
+
+    def form_reveal(sess, url: str, title: str, harvested: list[str],
+                    shown: set[str]) -> tuple[list[dict], list[dict], dict]:
+        """Set the page's form the way one model call says, in code, and harvest again (docseek.form_plan).
+
+        For what the filter step cannot set: document types as checkboxes, a date range typed into two fields.
+        Returns like filter_reveal; `set` is empty when the model would leave the form as it is."""
+        with escalation_slot:           # the model's usage is read around the call: no agent run in between
+            with lock:
+                if form_plans[0] >= MAX_FORM_PLANS or sum(tokens.values()) >= agent_token_cap:
+                    return [], [], {'skipped': True}
+            form = read_form(sess.page)
+            info: dict = {'controls': len(form['controls'])}
+            if not form['controls']:
+                return [], [], info
+            spent = (agent.usage.input_tokens, agent.usage.output_tokens)
+            plan = plan_form(agent, goal, sess.page.url, clean_text(title), harvested[:15],
+                             {'controls': [{k: clean_text(v) if isinstance(v, str) else [clean_text(o) for o in v]
+                                            for k, v in c.items()} for c in form['controls']],
+                              'buttons': form['buttons']})
+            with lock:
+                form_plans[0] += 1
+                tokens['prompt'] += agent.usage.input_tokens - spent[0]
+                tokens['completion'] += agent.usage.output_tokens - spent[1]
+        if plan is None:
+            return [], [], {**info, 'error': 'no plan'}
+        info['set'] = {step['label'] or step['id']: step['values'] for step in plan['set']}
+        info['press'] = plan['press_label']
+        if not plan['set']:
+            return [], [], info
+        apply_plan(sess.page, plan)
+        found = revealed_since(sess, url, shown)
+        if sess.page.url != url:
+            with lock:
+                # the listing the form loaded has been read here: it is not a page to visit again, and its
+                # next pages are more of it, not a path nobody has seen
+                form_facets.append(_listing_facets(sess.page.url))
+                classified.add(canonical(sess.page.url))
+                paths_queued[paging_identity(sess.page.url, frozenset(kept_facets))] += 1
+        return *found, info
+
+    def behind_own_form(url: str) -> bool:
+        """The page is a listing the crawl's own form produced (or a next page of it): its form is already set."""
+        facets = _listing_facets(url)
+        with lock:
+            return any(own and own <= facets for own in form_facets)
 
     def click_downloads(sess) -> list[str]:
         """URLs that a few href-less download buttons open when clicked. Nothing is saved."""
@@ -847,6 +943,8 @@ def jev_crawl(
 
     escalation_pool = ThreadPoolExecutor(1)   # the agent starts its own browser: keep it off page threads
     escalation_slot = threading.Lock()
+    form_plans = [0]
+    form_facets: list[frozenset] = []      # what each form the crawl set narrowed its listing to
 
     def escalation_budget(trigger: str) -> int:
         """What one escalated page may spend. Driving a filter needs a large budget; an empty page has never
@@ -1003,22 +1101,49 @@ def jev_crawl(
                     crawl_accepted = sum(1 for c in candidates.values() if c and c.verdict == 'accepted')
                 trigger = _escalation_trigger(judge, goal, url, title, kind, docs, new_pages,
                                               accepted, controls, record, crawl_accepted)
-                if trigger == 'filtered_listing':
-                    # The agent is paid many tokens to set a filter; Jev picking the value costs
-                    # a fraction of that and well under a second. The agent still gets the page when this reveals nothing.
-                    try:
-                        revealed, record['filter_reveal'] = filter_reveal(
-                            sess, url, title, harvested, {d['url'] for d in docs})
-                    except Exception as exc:  # noqa: BLE001 - a filter that will not drive is the agent's job
-                        revealed, record['filter_reveal'] = [], {'error': str(exc)[:200]}
+                def take(revealed: list[dict], more_pages: list[dict], info: dict) -> bool:
+                    """Judge the documents and queue the pages a filter or a form revealed. True when it paid."""
+                    nonlocal accepted, kept
+                    paid = False
                     if revealed:
                         acc2, kept2 = add_candidates(revealed, 'page', url, f'{title} ({url})', docs)
                         accepted, kept = accepted + acc2, kept + kept2
                         record['accepted'], record['kept'] = accepted, kept
-                        record['filter_reveal']['revealed'] = len(revealed)
-                        if kept2:
-                            trigger = None
+                        info['revealed'] = len(revealed)
+                        paid = bool(kept2)
+                    if more_pages and depth < max_depth:
+                        # a listing whose documents sit one page down: what was revealed is those pages
+                        info['new_pages'] = add_pages(more_pages, depth + 1, url, found_on=sess.page.url)
+                        paid = paid or bool(info['new_pages'])
+                    return paid
+
+                if trigger == 'filtered_listing':
+                    # The agent is paid many tokens to set a filter; Jev picking the value costs
+                    # a fraction of that and well under a second. The agent still gets the page when this reveals nothing.
+                    try:
+                        revealed, more_pages, record['filter_reveal'] = filter_reveal(
+                            sess, url, title, harvested, {d['url'] for d in docs + page_links})
+                    except Exception as exc:  # noqa: BLE001 - a filter that will not drive is the agent's job
+                        revealed, more_pages, record['filter_reveal'] = [], [], {'error': str(exc)[:200]}
+                    if take(revealed, more_pages, record['filter_reveal']):
+                        trigger = None
                     emit({'type': 'jev_filter_reveal', 'url': url, **record['filter_reveal']})
+                behind = behind_own_form(url)
+                if behind and trigger == 'typed_form':
+                    trigger = None             # the crawl set this page's form itself: nothing is left to type
+                if trigger in ('filtered_listing', 'typed_form') and agent is not None and not behind:
+                    # What that step cannot set is one model call, not the agent's many: the model reads
+                    # every control and says what to set, code sets it.
+                    try:
+                        revealed, more_pages, record['form_plan'] = form_reveal(
+                            sess, url, title, harvested, {d['url'] for d in docs + page_links})
+                    except Exception as exc:  # noqa: BLE001 - a form that will not drive is the agent's job
+                        revealed, more_pages, record['form_plan'] = [], [], {'error': str(exc)[:200]}
+                    if take(revealed, more_pages, record['form_plan']):
+                        trigger = None
+                    elif trigger == 'typed_form' and 'set' in record['form_plan']:
+                        trigger = None     # the model read the whole form: an agent would set, or leave, the same
+                    emit({'type': 'jev_form_plan', 'url': url, **record['form_plan']})
                 if (trigger == 'filtered_listing'
                         and escalations.get('filtered_listing', 0) >= MAX_FILTERED_LISTING_ESCALATIONS):
                     record['trigger_skipped'] = trigger    # the budget is better spent on more pages
