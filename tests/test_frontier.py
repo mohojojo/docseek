@@ -148,3 +148,20 @@ def test_a_news_page_naming_the_year_does_not_hold_the_crawl_open():
     f = Frontier()
     f.add('https://s.example/news/2025-results', kind='news_or_article', probability=0.9, depth=1, goal_year=True)
     assert not f.has_goal_year_page()
+
+
+class TestRevealedPages:
+    def test_pages_a_filter_revealed_come_before_the_unfiltered_listings_own(self):
+        frontier = Frontier('tier')
+        frontier.add('https://site-lv.example/?id=1', kind='fund_or_product', probability=0.9, depth=1, group='g')
+        frontier.add('https://site-lv.example/?id=2', kind='fund_or_product', probability=0.6, depth=1, group='g',
+                     revealed=True)
+        assert frontier.pop()[0] == 'https://site-lv.example/?id=2'
+
+    def test_they_come_before_a_page_that_merely_names_the_goals_year_whatever_they_look_like(self):
+        frontier = Frontier('tier')
+        frontier.add('https://site-lv.example/?id=1', kind='fund_or_product', probability=0.9, depth=1, group='g',
+                     goal_year=True)
+        frontier.add('https://site-lv.example/?id=2', kind='news_or_article', probability=0.6, depth=1, group='g',
+                     revealed=True)
+        assert frontier.pop()[0] == 'https://site-lv.example/?id=2'

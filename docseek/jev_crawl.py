@@ -323,8 +323,21 @@ _FILTER_SUBMIT_JS = r"""() => {
   return null;
 }"""
 
+_FIRST_PAGE_PARAM = re.compile(r'^(start|offset|page|pagina|seite|oldal|cur|limitstart)$', re.IGNORECASE)
+
+
+def is_first_page(url: str) -> bool:
+    """The URL names a listing's first page by a paging parameter (`?start=0`, `?page=1`): the listing itself."""
+    return any(_FIRST_PAGE_PARAM.match(k) and v in ('0', '1') for k, v in parse_qsl(urlparse(url).query))
+
+
 def canonical(url: str) -> str:
-    return _strip_fragment(url).rstrip('/').lower()
+    """The URL as the crawl tells pages apart. A listing's first page is the listing: `?start=0` and `?page=1`
+    name the page already visited."""
+    parsed = urlparse(_strip_fragment(url))
+    pairs = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True)
+             if not (_FIRST_PAGE_PARAM.match(k) and v in ('0', '1'))]
+    return parsed._replace(query=urlencode(pairs)).geturl().rstrip('/').lower()
 
 
 def clean_text(text: str) -> str:
@@ -626,9 +639,11 @@ def jev_crawl(
             accepted += verdict == 'accepted'
         return accepted, kept
 
-    def add_pages(links: list[dict], depth: int, parent: str | None = None, found_on: str | None = None) -> int:
+    def add_pages(links: list[dict], depth: int, parent: str | None = None, found_on: str | None = None,
+                  revealed: bool = False) -> int:
         """Classify unseen page links and put them in the Frontier. `found_on` is the URL the links were read
-        from when that is not `parent`: a form that was set loads its own URL, and its links carry its facets."""
+        from when that is not `parent`: a form that was set loads its own URL, and its links carry its facets.
+        `revealed` ranks them first in their tier: a filter set for the goal shows the pages the goal asked for."""
         with lock:
             fresh, seen = [], set()
             for c in links:
@@ -660,12 +675,14 @@ def jev_crawl(
                 variants = paths_queued[path]
                 if variants >= MAX_VARIANTS_PER_PATH:
                     continue                      # the rest is the same page, paginated
+                if variants and is_first_page(c['url']):
+                    continue                      # `?start=0` of a listing already queued is that listing
                 paths_queued[path] += 1
                 other = language is not None and url_language(c['url']) not in (None, language)
                 queued_from[c['url']] = (c, parent)
                 frontier.add(c['url'], kind=kind, probability=probability, depth=depth, other_language=other,
                              path_seen=variants > 0, group=c.get('path', ''), parent=parent,
-                             goal_year=names_goal_year(c, years))
+                             goal_year=names_goal_year(c, years), revealed=revealed)
                 queued += 1
         return queued
 
@@ -1135,8 +1152,15 @@ def jev_crawl(
                         info['revealed'] = len(revealed)
                         paid = bool(kept2)
                     if more_pages and depth < max_depth:
-                        # a listing whose documents sit one page down: what was revealed is those pages
-                        info['new_pages'] = add_pages(more_pages, depth + 1, url, found_on=sess.page.url)
+                        # a listing whose documents sit one page down: what was revealed is those pages. Its
+                        # next pages come too, unless it showed nothing new: the same listing in another language
+                        # lists the same pages, and its next pages would list the same again.
+                        here = paging_identity(sess.page.url, frozenset(kept_facets))
+                        paging = [p for p in more_pages if paging_identity(p['url'], frozenset(kept_facets)) == here]
+                        others = [p for p in more_pages if p not in paging]
+                        info['new_pages'] = add_pages(others, depth + 1, url, found_on=sess.page.url, revealed=True)
+                        if info['new_pages'] and paging:
+                            info['new_pages'] += add_pages(paging, depth + 1, url, found_on=sess.page.url, revealed=True)
                         paid = paid or bool(info['new_pages'])
                     return paid
 

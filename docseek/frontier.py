@@ -44,7 +44,7 @@ DRY_PAGES = 7             # replayed on recorded sites: a shorter dry run alread
 
 
 def frontier_key(kind: str, probability: float, depth: int, other_language: bool, order: int,
-                 path_seen: bool = False, goal_year: bool = False) -> tuple:
+                 path_seen: bool = False, goal_year: bool = False, revealed: bool = False) -> tuple:
     """Tier ordering: goal language, then tier, then the goal's year, then unseen paths, then P(kind), depth,
     discovery order.
 
@@ -56,11 +56,16 @@ def frontier_key(kind: str, probability: float, depth: int, other_language: bool
     archive, and a crawl asked for 2025 spent its budget on the 2026 listing while the `…-2025` archive waited. Such
     a link goes first within its tier, and a category page for that year counts as a listing; a news or legal page
     naming the year is not promoted.
+
+    `revealed`: the link appeared when the crawl set a listing's filter for the goal. Those pages are the listing the
+    goal asked for, whatever kind each looks like (a filing titled like a news item is one), and go before everything
+    else: the unfiltered listing's newest items name this year too, and ranked level with them a 10-page crawl never
+    reached one.
     """
     tier = KIND_TIER.get(kind, 2)
-    if goal_year and tier == 2:
+    if revealed or (goal_year and tier == 2):
         tier = 1
-    return (1 if other_language else 0, tier, 0 if goal_year else 1, 1 if path_seen else 0,
+    return (1 if other_language else 0, tier, 0 if revealed else 1 if goal_year else 2, 1 if path_seen else 0,
             -probability, depth, order)
 
 
@@ -107,9 +112,10 @@ class Frontier:
         return len(self.items)
 
     def add(self, url: str, *, kind: str, probability: float, depth: int, other_language: bool = False,
-            path_seen: bool = False, group: str = '', parent: str | None = None, goal_year: bool = False) -> None:
+            path_seen: bool = False, group: str = '', parent: str | None = None, goal_year: bool = False,
+            revealed: bool = False) -> None:
         group = group or url_template(url)
-        key = frontier_key(kind, probability, depth, other_language, self._order + 1, path_seen, goal_year)
+        key = frontier_key(kind, probability, depth, other_language, self._order + 1, path_seen, goal_year, revealed)
         tier = key[1]
         if group not in self.groups:
             self.groups[group] = _Group()
@@ -153,9 +159,10 @@ class Frontier:
             i.outer[1] <= 1 and not self.groups[i.group].picked for i in self.items.values())
 
     def has_goal_year_page(self) -> bool:
-        """True while a listing naming the goal's year is still queued: the archive the goal asks for is unvisited.
-        A news or legal page that merely names the year does not hold the crawl open."""
-        return any(i.outer[2] == 0 and i.outer[1] <= 1 for i in self.items.values())
+        """True while a listing naming the goal's year, or a page a filter set for the goal revealed, is still
+        queued: what the goal asks for is unvisited. A news or legal page that merely names the year does not
+        hold the crawl open."""
+        return any(i.outer[2] <= 1 and i.outer[1] <= 1 for i in self.items.values())
 
     def record(self, url: str, accepted: int) -> None:
         """What visiting `url` paid: documents accepted for the first time, plus new tier-1 groups."""

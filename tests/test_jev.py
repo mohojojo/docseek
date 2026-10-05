@@ -802,6 +802,16 @@ class TestPagingIdentity:
         assert paging_identity('https://site-es.example/f.aspx?nif=V1&vista=5') == paging_identity('https://site-es.example/f.aspx?vista=5&nif=V1')
 
 
+class TestCanonical:
+    def test_a_listings_first_page_is_the_listing(self):
+        from docseek.jev_crawl import canonical
+        listing = canonical('https://site-lv.example/en/?view=docs&doc_types[0]=111')
+        assert canonical('https://site-lv.example/en/?view=docs&doc_types[0]=111&start=0') == listing
+        assert canonical('https://site-lv.example/en/?view=docs&doc_types[0]=111&page=1') == listing
+        assert canonical('https://site-lv.example/en/?view=docs&doc_types[0]=111&start=20') != listing
+        assert canonical('https://site-lv.example/en/?view=docs&start=0#top') == canonical('https://site-lv.example/en/?view=docs')
+
+
 class TestBracketFacets:
     """A bracketed parameter sets a facet and is not followed, except as the next page of a listing already behind it."""
 
