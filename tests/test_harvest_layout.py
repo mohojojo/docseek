@@ -71,3 +71,27 @@ def test_an_ordinary_link_gets_no_invented_label(page):
                           '<p><a href="/x/annual-2025.pdf">Annual report 2025</a></p></main></body></html>')
     assert links['annual-2025.pdf']['section'] == 'Reports'
     assert links['annual-2025.pdf']['column'] == ''
+
+
+# A regulator's filing page, reduced: the files are "Download" links beside file names that carry the period end in
+# their name, and the filing's own date sits in a labelled row further up.
+FILING = """<html><body><main><h1>Audited Annual Report for 2025</h1>
+<table><tr><td>Date</td><td>2026-03-19 09:56:26</td></tr>
+<tr><td>Files</td><td><div class="files">
+  <div class="row"><span>Annual_report_2025.pdf (14569 kB)</span> <a href="/?task=download&f_id=1">Download</a></div>
+  <div class="row"><span>bank-2025-12-31-en.zip (9566 kB)</span> <a href="/?task=download&f_id=2">Download</a></div>
+</div></td></tr></table>
+<section><div><div><p>Published 12.03.2026 <a href="/?task=download&f_id=3">Download</a></p></div></div></section>
+<section><div><div><p>Közzétéve: 2026.09.22. <a href="/?task=download&f_id=4">Letöltés</a></p></div></div></section>
+<section><div><div><p>2026. május 12-én kelt <a href="/?task=download&f_id=5">Letöltés</a></p></div></div></section>
+</main></body></html>"""
+
+
+def test_a_date_glued_into_a_file_name_is_not_the_rows_dated_line(page):
+    page.set_content(FILING)
+    dated = {link['href'].rsplit('=', 1)[-1]: link['dated'] for link in page.evaluate(_HARVEST_JS)}
+    assert dated['1'] == ''                      # no date in the row, and the filing's date is further up
+    assert dated['2'] == ''                      # 2025-12-31 is part of the file name
+    assert dated['3'] == '12.03.2026'            # a date written beside the link still counts
+    assert dated['4'] == '2026.09.22.'           # the Hungarian numeric form, day included
+    assert dated['5'] == ''                      # no dated line: "12-én" is a day with a suffix, as before

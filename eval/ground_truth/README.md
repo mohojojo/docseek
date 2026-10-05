@@ -112,6 +112,17 @@ replay a frontier policy over a recorded site offline:
 
 The replay reports recall only when the recording's goal matches the ground-truth goal.
 
+The same snapshots let `eval.judge_ab` measure a change in what the judge is told, offline: every
+recorded candidate is judged as recorded, with the change applied, and as recorded again, so the change is
+read against the judge's own run-to-run noise. The judge's verdict bands were calibrated on its shipped
+input, so a change that moves scores, even upward, needs this before it ships:
+
+```sh
+.venv/bin/python -m eval.judge_ab eval/snapshots/<stamp>/*/run1 --label my-change
+```
+
+What the "on" arm applies lives in `treat()` in `eval/judge_ab.py`; edit it for the change under test.
+
 ### run_baseline: the agentic crawler
 
 Needs an LLM: `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY`, or `ANTHROPIC_API_KEY`.

@@ -191,10 +191,11 @@ _HARVEST_JS = """() => {
       if (t.length > name.length + 10) ctx = t.slice(0, 160);
     }
     const section = chrome(a) ? '' : [...trail.slice(-2).map(h => h.text), panelOf(a)].filter(Boolean).join(' > ');
-    // the row's dated line, wherever it sits in the row: the year facet reads it, not the model
+    // the row's dated line, wherever it sits in the row: the year facet reads it, not the model. A date
+    // glued into a file name (report-2025-12-31-en.zip) is a period end, not a dated line.
     let dated = '';
     for (let el = a.parentElement, i = 0; el && i < 4 && !dated; el = el.parentElement, i++) {
-      const m = clean(el.innerText || el.textContent).match(/\\b20\\d\\d\\. ?(?:\\d{1,2}\\.|[a-záéíóöőúüű]+ \\d{1,2}\\.)|\\b\\d{1,2}[./]\\d{1,2}[./]20\\d\\d\\b|\\b20\\d\\d-\\d\\d-\\d\\d\\b/);
+      const m = clean(el.innerText || el.textContent).match(/(?<![\\w\\-/])(?:20\\d\\d\\. ?(?:\\d{1,2}\\.(?: ?\\d{1,2}\\.?)?|[a-záéíóöőúüű]+ \\d{1,2}\\.)|\\d{1,2}[./]\\d{1,2}[./]20\\d\\d|20\\d\\d-\\d\\d-\\d\\d)(?!\\w)/);
       if (m) dated = m[0];
     }
     out.push({href, name, context: ctx, section, column: columnOf(a) || cellLabelOf(a), path: pathOf(a), dated});
@@ -998,6 +999,27 @@ def jev_crawl(
             return {'accepted': accepted, 'kept': kept, 'nominated': len(result.downloads),
                     'ms': round((time.perf_counter() - began) * 1000)}
 
+    def date_documents(docs: list[dict], url: str, kind: str) -> int:
+        """Documents that show no date of their own are dated by the listing row that linked their page.
+
+        A regulator's filing page lists its files as "Download" beside a file name; the filing's date is in
+        the row of the listing that led here. The judge is told it in the link's own context, in words - the
+        page field of the question was tried and changed nothing - and the published Facet reads it too.
+        A listing or category page lists many dates, so the row's date is not handed down to those."""
+        if kind in ('seed', 'document_listing', 'category_or_overview'):
+            return 0
+        link, _ = queued_from.get(url, ({}, None))
+        when = date_of(link.get('dated', ''))
+        if not when:
+            return 0
+        dated = 0
+        for d in docs:
+            if not d.get('dated'):
+                d['dated'] = when
+                d['context'] = f"{d.get('context', '')} - published {when}".lstrip(' -')
+                dated += 1
+        return dated
+
     def visit(url: str, depth: int, kind: str) -> dict:
         record = {'url': url, 'depth': depth, 'kind': kind, 'accepted': 0, 'kept': 0}
         began = time.perf_counter()
@@ -1039,13 +1061,13 @@ def jev_crawl(
                     settle(sess, 5000)
                     docs, page_links = split_links(sess.page.evaluate(_HARVEST_JS), url)
                     record['waited_for_app'] = True
-                if on_trace:
-                    on_trace({'type': 'harvest', 'url': url, 'depth': depth, 'html': sess.page.content(),
-                              'documents': docs, 'page_links': page_links})
                 # links the URL did not give away: ask the server, one sibling group at a time
                 served, page_links = probe.sort(page_links)
                 docs += served
                 record['probed_documents'] = len(served)
+                if on_trace:
+                    on_trace({'type': 'harvest', 'url': url, 'depth': depth, 'html': sess.page.content(),
+                              'documents': docs, 'page_links': page_links})
                 # documents the page named in the JSON it fetched for itself, whether or not it rendered
                 # them as links. Relative paths need a prefix the page's own links reveal; absolute
                 # URLs are taken as given. Anything not already a document by URL is asked like a page link.
@@ -1067,6 +1089,7 @@ def jev_crawl(
                 record['json'] = {'responses': len(sess.json_bodies), 'named': len(mined),
                                   'documents': len(mined) and len(by_url) + len(by_probe)}
                 sess.json_bodies.clear()
+                date_documents(docs, url, kind)
                 harvested = [d['name'] or d['url'].rsplit('/', 1)[-1] for d in docs]
                 accepted, kept = add_candidates(docs, 'page', url, f'{title} ({url})')
                 record['accepted'], record['kept'] = accepted, kept
