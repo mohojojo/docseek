@@ -20,6 +20,9 @@ The crawl is driven by a **relevance judge** that answers four questions, and co
 3. **Does this page still hide documents?** If so, the page is **escalated** to a browsing agent that clicks,
    fills in and scrolls until it finds them.
 4. **Which filter value shows the documents?** Code finds the page's filters, the judge picks the value, code sets it.
+   A form that is more than a dropdown - document types as checkboxes, a date range typed into two fields - is set
+   by one call to the crawl agent's model: code lists every control the page offers, the model says which to set to
+   what, code sets them. The pages that appear are visited first.
 
 Three judges are built in:
 
