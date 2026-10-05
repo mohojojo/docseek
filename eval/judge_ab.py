@@ -4,9 +4,9 @@
 
 Every candidate a recording harvested is judged three times with the same judge: as recorded (`off`), with
 the change under test applied (`on`), and as recorded again (`off2`), so the change is read against the
-judge's own run-to-run noise. The change is applied by `treat()`, which rebuilds what the crawl now
-computes from the recorded pages: it replays the harvest script over the recorded HTML in a browser, so a
-changed dated-line rule or a date handed down from a listing row shows up exactly as a crawl would see it.
+judge's own run-to-run noise. `shipped()` rebuilds what the crawl now sends for a recorded candidate (it replays the harvest script over the
+recorded HTML in a browser, so a changed dated-line rule or a date handed down from a listing row shows up exactly
+as a crawl would see it), and `change()` applies the change under test on top; edit `change()` for a new one.
 
 Scored at the accepted band against the site's ground truth (eval/ground_truth), per site and pooled, with
 the mean score shift of each arm against `off`. Jev's verdict bands were calibrated on its shipped input:
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 import sys
 import time
@@ -67,9 +68,34 @@ def replay_harvest(browser, url: str, html: str) -> tuple[dict[str, str], dict[s
         page.close()
 
 
+_GENERIC_LINK = {'download', 'downloads', 'file', 'files', 'document', 'documents', 'doc', 'view', 'open', 'pdf', 'show',
+                 'get', 'dl', 'attachment', 'link', 'here', 'letöltés', 'megnyitás', 'megtekintés', 'lejupielādēt', 'skatīt',
+                 'herunterladen', 'ansehen', 'öffnen', 'descargar', 'ver', 'pobierz', 'télécharger', 'télécharger le pdf'}
+_FILE_NAME = re.compile(r'(?<![\w/])([^\s()]+\.(?:pdf|xlsx?|docx?|pptx?|zip|xhtml|csv))(?=[\s(]|$)', re.IGNORECASE)
+
+
+def shipped(d: dict, when: str | None, own: str) -> dict:
+    """What the crawl now sends for a recorded candidate: the listing row's date, where the page was linked from a
+    dated row and the document shows no date of its own (shipped 2026-10-05)."""
+    out = dict(d)
+    if when and not own:
+        out['context'] = f"{d.get('context', '')} - published {when}".lstrip(' -')
+    return out
+
+
+def change(d: dict) -> dict:
+    """The change under test, applied on top of `shipped()`. Identity when nothing is under test.
+
+    Tried and not shipped (2026-10-05): naming a link that says only "Download" by the file name beside it. Alone it
+    cost csri 12 -> 2 true accepts, because a name with digits counts as strong and the row text - and with it the
+    row's date - is then not sent; with the row kept it was 11 -> 9, within noise. The `_GENERIC_LINK` and
+    `_FILE_NAME` rules above are what that attempt used.
+    """
+    return d
+
+
 def treat(run: dict, browser) -> tuple[list[dict], dict]:
-    """The recorded candidates, and for each what the change gives it: the documents of a page linked from a
-    dated listing row, that show no dated line of their own, carry that date in their context."""
+    """The recorded candidates, each as the crawl now sends it (`off`) and with the change under test on top (`on`)."""
     dated_now: dict[str, dict[str, str]] = {}      # page url -> href -> dated line, by the current script
     dated_old: dict[str, dict[str, str]] = {}      # ...and by the old rule, replayed the same way
     for p in run['pages']:
@@ -89,11 +115,10 @@ def treat(run: dict, browser) -> tuple[list[dict], dict]:
             stats['documents'] += 1
             own = dated_now.get(p['url'], {}).get(d['url'], d.get('dated', ''))
             stats['dated_changed'] += own != dated_old.get(p['url'], {}).get(d['url'], d.get('dated', ''))
-            treated = dict(d)
-            if when and not own:
-                treated['context'] = f"{d.get('context', '')} - published {when}".lstrip(' -')
-                stats['treated'] += 1
-            candidates.append({'page': p['url'], 'off': d, 'on': treated})
+            off = shipped(d, when, own)
+            on = change(off)
+            stats['treated'] += on != off
+            candidates.append({'page': p['url'], 'off': off, 'on': on})
     return candidates, stats
 
 

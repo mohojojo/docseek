@@ -121,7 +121,7 @@ input, so a change that moves scores, even upward, needs this before it ships:
 .venv/bin/python -m eval.judge_ab eval/snapshots/<stamp>/*/run1 --label my-change
 ```
 
-What the "on" arm applies lives in `treat()` in `eval/judge_ab.py`; edit it for the change under test.
+What the "on" arm applies is `change()` in `eval/judge_ab.py`; `shipped()` is what the crawl sends today. Edit `change()` for the change under test.
 
 ### run_baseline: the agentic crawler
 
