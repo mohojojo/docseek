@@ -73,7 +73,8 @@ def replay(rec: Recording, frontier: Frontier, max_pages: int = 40, parallel: in
                 continue
             frontier.add(link['url'], kind=answer['kind'], probability=answer['probability'], depth=depth,
                          other_language=language is not None and url_language(link['url']) not in (None, language),
-                         path_seen=paths_queued[path] > 0, group=link.get('path', ''), parent=parent)
+                         path_seen=paths_queued[path] > 0, group=link.get('path', ''), parent=parent,
+                         chrome=bool(link.get('chrome')))
             paths_queued[path] += 1
 
     frontier.add_seed(rec.seed)
@@ -118,7 +119,8 @@ def replay(rec: Recording, frontier: Frontier, max_pages: int = 40, parallel: in
     return out
 
 
-POLICIES = {'tier (shipped)': {'policy': 'tier'}}
+POLICIES = {'tier (shipped)': {'policy': 'tier'}, 'tier menus level (pre-0.10)': {'policy': 'tier', 'content_first': False},
+            'tier listing-first': {'policy': 'tier', 'listing_first': True}}
 for _depth in (2, 3, 4):
     POLICIES[f'tier max_depth {_depth}'] = {'policy': 'tier', 'max_depth': _depth}
 POLICIES['bandit'] = {'policy': 'bandit'}

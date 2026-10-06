@@ -104,6 +104,17 @@ ESCALATION_QUEUE_CAP = 50          # URLs one escalated page may add to the Fron
 _HARVEST_JS = """() => {
   const clean = t => (t || '').replace(/\\s+/g, ' ').trim();
   const chrome = el => !!el.closest('nav, header, footer, aside, [role=navigation], [role=banner], [role=contentinfo]');
+  // A link in the site's menus, as opposed to the page's content: what the Frontier visits last within a tier. A
+  // <nav> that pages a listing is not a menu: one regulator's decisions were paged by a <nav>, and with it read as
+  // a menu the crawl visited every decision on page one and stopped. A <nav> inside the content is a menu still -
+  // one hub page's sidebar lists the site's sections there, and read as content it outranked the hub's own table.
+  const paginator = nav => /pagin|pager|paging|oldal|seite|lapoz/i.test((nav.getAttribute('aria-label') || '') + ' ' + (nav.className || ''))
+    || [...nav.querySelectorAll('a')].filter(x => /^\\d+$/.test((x.textContent || '').trim())).length >= 2;
+  const menu = a => {
+    if (a.closest('header, footer, aside, [role=banner], [role=contentinfo]')) return true;
+    const nav = a.closest('nav, [role=navigation]');
+    return !!nav && !paginator(nav);
+  };
   const columnOf = a => {
     const cell = a.closest('td, th');
     const table = cell && cell.closest('table');
@@ -198,7 +209,8 @@ _HARVEST_JS = """() => {
       const m = clean(el.innerText || el.textContent).match(/(?<![\\w\\-/])(?:20\\d\\d\\. ?(?:\\d{1,2}\\.(?: ?\\d{1,2}\\.?)?|[a-záéíóöőúüű]+ \\d{1,2}\\.)|\\d{1,2}[./]\\d{1,2}[./]20\\d\\d|20\\d\\d-\\d\\d-\\d\\d)(?!\\w)/);
       if (m) dated = m[0];
     }
-    out.push({href, name, context: ctx, section, column: columnOf(a) || cellLabelOf(a), path: pathOf(a), dated});
+    out.push({href, name, context: ctx, section, column: columnOf(a) || cellLabelOf(a), path: pathOf(a), dated,
+              chrome: menu(a)});
   }
   return out;
 }"""
@@ -682,7 +694,7 @@ def jev_crawl(
                 queued_from[c['url']] = (c, parent)
                 frontier.add(c['url'], kind=kind, probability=probability, depth=depth, other_language=other,
                              path_seen=variants > 0, group=c.get('path', ''), parent=parent,
-                             goal_year=names_goal_year(c, years), revealed=revealed)
+                             goal_year=names_goal_year(c, years), revealed=revealed, chrome=bool(c.get('chrome')))
                 queued += 1
         return queued
 
@@ -692,7 +704,9 @@ def jev_crawl(
         for link in raw:
             url = _strip_fragment(link.get('href', ''))
             entry = merged.setdefault(url, {'url': url, 'name': '', 'context': '', 'section': '', 'column': '',
-                                            'path': link.get('path') or '', 'dated': link.get('dated') or ''})
+                                            'path': link.get('path') or '', 'dated': link.get('dated') or '',
+                                            'chrome': bool(link.get('chrome'))})
+            entry['chrome'] = entry['chrome'] and bool(link.get('chrome'))     # linked from the content anywhere: content
             name = clean_text(link.get('name') or '')
             context = clean_text(link.get('context') or '')
             if looks_like_instructions(name) or looks_like_instructions(context):
@@ -1228,7 +1242,8 @@ def jev_crawl(
             # 2025 archive queued.
             if should_stop_for_no_progress(progress['stale'], len(pages), max_pages,
                                            time.perf_counter() - started, max_seconds) \
-                    and not frontier.has_untried_tier1() and not frontier.has_goal_year_page():
+                    and not frontier.has_untried_tier1() and not frontier.has_goal_year_page() \
+                    and not frontier.has_menu_listing():
                 stop_reason = 'no_progress'
                 break
             if judge.open:

@@ -95,3 +95,25 @@ def test_a_date_glued_into_a_file_name_is_not_the_rows_dated_line(page):
     assert dated['3'] == '12.03.2026'            # a date written beside the link still counts
     assert dated['4'] == '2026.09.22.'           # the Hungarian numeric form, day included
     assert dated['5'] == ''                      # no dated line: "12-én" is a day with a suffix, as before
+
+
+# A regulator's decisions listing, reduced: the header menu, the listing in <main>, its paginator in a <nav>, and a
+# sidebar <nav> of the site's sections inside the content.
+MENUS = """<html><body>
+<header><nav><a href="/decisions">Decisions</a><a href="/about">About</a></nav></header>
+<main>
+  <table><tr><td><a href="/decision/1">NAIH-1-2022</a></td></tr></table>
+  <nav class="pagination"><a href="/decisions?start=50">2</a><a href="/decisions?start=100">3</a><a href="/decisions?start=50">Next</a></nav>
+  <nav aria-label="related"><a href="/decisions/by-tag">By tag</a></nav>
+</main>
+<footer><a href="/privacy">Privacy</a></footer>
+</body></html>"""
+
+
+def test_menus_are_chrome_a_sidebar_too_but_a_paginator_is_not(page):
+    page.set_content(MENUS)
+    keys = ('decisions?start=50', 'decisions?start=100', 'decisions/by-tag', 'decision/1', 'decisions', 'about', 'privacy')
+    chrome = {next(k for k in keys if link['href'].endswith(k)): link['chrome'] for link in page.evaluate(_HARVEST_JS)}
+    assert chrome['decisions'] and chrome['about'] and chrome['privacy']
+    assert not chrome['decision/1'] and not chrome['decisions?start=50'] and not chrome['decisions?start=100']
+    assert chrome['decisions/by-tag']

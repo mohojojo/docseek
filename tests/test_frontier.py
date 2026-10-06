@@ -165,3 +165,26 @@ class TestRevealedPages:
         frontier.add('https://site-lv.example/?id=2', kind='news_or_article', probability=0.6, depth=1, group='g',
                      revealed=True)
         assert frontier.pop()[0] == 'https://site-lv.example/?id=2'
+
+
+class TestContentFirst:
+    def test_a_pages_own_links_come_before_its_menu_links_in_the_same_tier(self):
+        frontier = Frontier('tier')
+        frontier.add('https://site-hu.example/menu-fund', kind='fund_or_product', probability=1.0, depth=1, group='g',
+                     chrome=True)
+        frontier.add('https://site-hu.example/table-archive', kind='fund_or_product', probability=0.5, depth=1, group='g')
+        assert frontier.pop()[0] == 'https://site-hu.example/table-archive'
+
+    def test_but_not_before_a_better_tier(self):
+        frontier = Frontier('tier')
+        frontier.add('https://site-hu.example/menu-reports', kind='document_listing', probability=0.9, depth=1, group='g',
+                     chrome=True)
+        frontier.add('https://site-hu.example/news-item', kind='news_or_article', probability=0.9, depth=1, group='g')
+        assert frontier.pop()[0] == 'https://site-hu.example/menu-reports'
+
+    def test_the_old_order_is_still_there_for_the_replay(self):
+        frontier = Frontier('tier', content_first=False)
+        frontier.add('https://site-hu.example/menu-fund', kind='fund_or_product', probability=1.0, depth=1, group='g',
+                     chrome=True)
+        frontier.add('https://site-hu.example/table-archive', kind='fund_or_product', probability=0.5, depth=1, group='g')
+        assert frontier.pop()[0] == 'https://site-hu.example/menu-fund'

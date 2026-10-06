@@ -44,7 +44,8 @@ DRY_PAGES = 7             # replayed on recorded sites: a shorter dry run alread
 
 
 def frontier_key(kind: str, probability: float, depth: int, other_language: bool, order: int,
-                 path_seen: bool = False, goal_year: bool = False, revealed: bool = False) -> tuple:
+                 path_seen: bool = False, goal_year: bool = False, revealed: bool = False,
+                 chrome: bool = False, listing_first: bool = False) -> tuple:
     """Tier ordering: goal language, then tier, then the goal's year, then unseen paths, then P(kind), depth,
     discovery order.
 
@@ -61,12 +62,29 @@ def frontier_key(kind: str, probability: float, depth: int, other_language: bool
     goal asked for, whatever kind each looks like (a filing titled like a news item is one), and go before everything
     else: the unfiltered listing's newest items name this year too, and ranked level with them a 10-page crawl never
     reached one.
+
+    `chrome`: the link sits in the site's menus, header, footer or a sidebar and nowhere in the page's content (a
+    paginator is content). Within a tier the content's links come first (`content_first`, the default): a hub page's
+    table links each subject's report archive through an icon, while the header menu names every fund in words, and
+    the named menu pages took the whole budget. Measured live 2026-10-06: that site went from 1 to 9 of 17 reports in
+    10 pages (two runs) and from 3 to 17 in 40; a company whose reports page is reached only through its menu was
+    unchanged (7 of 8 in 10 pages either way); a regulator whose menu leads to a notices listing holding a fifth of
+    its hits scored 0.30, 0.55 and 0.51 against 0.51, 0.53 and 0.53, so `has_menu_listing` holds the crawl open
+    while such a listing waits. Six replayed recordings moved nothing.
+
+    `listing_first`: within the first tier, document listings before single-subject pages. Replayed only: it took one
+    results archive from 2 to 11 accepted in 10 pages but cost the hub site above every report, so it is not the
+    default. Both are kept for eval.frontier_replay to weigh on new recordings.
     """
     tier = KIND_TIER.get(kind, 2)
     if revealed or (goal_year and tier == 2):
         tier = 1
-    return (1 if other_language else 0, tier, 0 if revealed else 1 if goal_year else 2, 1 if path_seen else 0,
-            -probability, depth, order)
+    listing = 0 if not listing_first or kind == 'document_listing' else 1
+    # a menu names every subject; a content link to one subject's page is the page's own pointer. A menu's link to a
+    # document listing keeps its rank: that is where sites put their document sections, and one regulator's
+    # notices listing, reached only from the menu, held a fifth of its decisions.
+    return (1 if other_language else 0, tier, 0 if revealed else 1 if goal_year else 2, listing, 1 if chrome else 0,
+            1 if path_seen else 0, -probability, depth, order)
 
 
 def url_template(url: str) -> str:
@@ -107,27 +125,30 @@ class Frontier:
     _pulls: int = 0
     _dry: int = 0
     rescued_at: int | None = None     # pages visited when `rescue` left the shipped order
+    content_first: bool = True        # a page's content links before its menu links (see frontier_key)
+    listing_first: bool = False       # within the first tier, document listings before single-subject pages
 
     def __len__(self) -> int:
         return len(self.items)
 
     def add(self, url: str, *, kind: str, probability: float, depth: int, other_language: bool = False,
             path_seen: bool = False, group: str = '', parent: str | None = None, goal_year: bool = False,
-            revealed: bool = False) -> None:
+            revealed: bool = False, chrome: bool = False) -> None:
         group = group or url_template(url)
-        key = frontier_key(kind, probability, depth, other_language, self._order + 1, path_seen, goal_year, revealed)
+        key = frontier_key(kind, probability, depth, other_language, self._order + 1, path_seen, goal_year, revealed,
+                           chrome and self.content_first, self.listing_first)
         tier = key[1]
         if group not in self.groups:
             self.groups[group] = _Group()
             if parent and tier == 1:
                 self._opened_by[parent] = self._opened_by.get(parent, 0) + 1
         self._order += 1
-        self.items[url] = _Item(url, depth, kind, key[:4], key[4:], group)
+        self.items[url] = _Item(url, depth, kind, key[:6], key[6:], group)
         self._group_of[url] = group
 
     def add_seed(self, url: str) -> None:
         self.groups.setdefault('seed', _Group())
-        self.items[url] = _Item(url, 0, 'seed', (0, 0, 0, 0), (-1.0, 0, 0), 'seed')
+        self.items[url] = _Item(url, 0, 'seed', (0, 0, 0, 0, 0, 0), (-1.0, 0, 0), 'seed')
         self._group_of[url] = 'seed'
 
     def _score(self, group: str) -> float:
@@ -163,6 +184,11 @@ class Frontier:
         queued: what the goal asks for is unvisited. A news or legal page that merely names the year does not
         hold the crawl open."""
         return any(i.outer[2] <= 1 and i.outer[1] <= 1 for i in self.items.values())
+
+    def has_menu_listing(self) -> bool:
+        """True while a document listing the site's menu links to is still queued. The content's links come first,
+        so a crawl that found nothing in them has not yet looked where the site files its documents."""
+        return any(i.kind == 'document_listing' and i.outer[4] == 1 for i in self.items.values())
 
     def record(self, url: str, accepted: int) -> None:
         """What visiting `url` paid: documents accepted for the first time, plus new tier-1 groups."""

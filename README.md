@@ -16,7 +16,8 @@ listing, or spread over hundreds of pages of look-alike documents.
 The crawl is driven by a **relevance judge** that answers four questions, and code does everything else:
 
 1. **Is this link a document the goal asks for?** Every candidate gets a relevance score and a verdict.
-2. **What kind of page does this link lead to?** Pages are visited in order of how likely they list documents.
+2. **What kind of page does this link lead to?** Pages are visited in order of how likely they list documents,
+   a page's own links before its menu links.
 3. **Does this page still hide documents?** If so, the page is **escalated** to a browsing agent that clicks,
    fills in and scrolls until it finds them.
 4. **Which filter value shows the documents?** Code finds the page's filters, the judge picks the value, code sets it.
