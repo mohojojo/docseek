@@ -21,10 +21,12 @@ import itertools
 import json
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 from docseek.frontier import Frontier
 from docseek.jev_crawl import (
-    MAX_VARIANTS_PER_PATH, canonical, goal_language, paging_identity, should_stop_for_no_progress, url_language,
+    MAX_VARIANTS_PER_PATH, canonical, goal_language, is_first_page, keeps_parent_facets, paging_identity,
+    should_stop_for_no_progress, url_language,
 )
 from eval.run_baseline import load_ground_truth, normalize_url
 
@@ -67,9 +69,11 @@ def replay(rec: Recording, frontier: Frontier, max_pages: int = 40, parallel: in
             answer = rec.kinds.get(key)
             if key in classified or answer is None:
                 continue                                  # never classified in the recording: not queued there either
+            if '[' in unquote(link['url']) and not link.get('facet_chosen') and not keeps_parent_facets(link['url'], parent):
+                continue                                  # a facet link, as the crawl refuses it (replayed: none chosen)
             classified.add(key)
             path = paging_identity(link['url'])
-            if paths_queued[path] >= MAX_VARIANTS_PER_PATH:
+            if paths_queued[path] >= MAX_VARIANTS_PER_PATH or (paths_queued[path] and is_first_page(link['url'])):
                 continue
             frontier.add(link['url'], kind=answer['kind'], probability=answer['probability'], depth=depth,
                          other_language=language is not None and url_language(link['url']) not in (None, language),

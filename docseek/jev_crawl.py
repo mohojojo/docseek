@@ -23,7 +23,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
-from urllib.parse import parse_qsl, urlencode, urlparse
+from urllib.parse import parse_qsl, unquote, urlencode, urlparse
 
 import httpx
 
@@ -36,7 +36,7 @@ from .document_probe import DocumentProbe
 from .form_plan import apply_plan, plan_form, read_form
 from .frontier import Frontier, frontier_key  # noqa: F401 - frontier_key is re-exported
 from .json_mining import MAX_JSON_BYTES, candidates_from_json
-from .judge import RelevanceJudge, make_judge, verdict_for
+from .judge import MAX_FILTER_OPTIONS, RelevanceJudge, make_judge, verdict_for
 from .llm import LLMClient
 from .models import AgenticCrawlResult, AgenticDownload
 from .proxy import (
@@ -513,6 +513,29 @@ def _listing_facets(url: str) -> frozenset[tuple[str, str]]:
     return frozenset((_facet_key(k), v) for k, v in parse_qsl(urlparse(url).query) if _FACET_PARAM.search(k))
 
 
+def facet_groups(page_url: str, links: list[dict]) -> dict[str, list[dict]]:
+    """The links that narrow this listing by one facet, grouped by the facet's parameter: the listing's own URL plus
+    one query pair whose key is bracketed (`f[0]=`) or a filter word, or with one such pair's value changed. Three or
+    more under one key are a filter the page offers as links, and the judge picks among them as it does for a
+    dropdown; followed one and all, a library's dozens of facets took a crawl's whole budget."""
+    base = urlparse(page_url)
+    base_pairs = collections.Counter(parse_qsl(base.query, keep_blank_values=True))
+    groups: dict[str, list[dict]] = {}
+    for link in links:
+        parsed = urlparse(link['url'])
+        if parsed.path.rstrip('/') != base.path.rstrip('/') or parsed.netloc != base.netloc:
+            continue
+        pairs = collections.Counter(parse_qsl(parsed.query, keep_blank_values=True))
+        added, removed = list((pairs - base_pairs).elements()), list((base_pairs - pairs).elements())
+        if len(added) != 1 or (removed and (len(removed) != 1 or removed[0][0] != added[0][0])):
+            continue
+        key, value = added[0]
+        if not value or _PAGING_PARAM.search(key) or not ('[' in key or _FACET_PARAM.search(key)):
+            continue
+        groups.setdefault(_facet_key(key), []).append(link)
+    return {key: group for key, group in groups.items() if len(group) >= 3}
+
+
 def keeps_parent_facets(url: str, parent: str | None) -> bool:
     """A link with a bracketed parameter (`types[0]=111`) sets a facet, and a listing's facets multiply into more
     pages than any budget, so such links are not followed. The exception is the next page of a listing that
@@ -662,7 +685,8 @@ def jev_crawl(
                 key = canonical(c['url'])
                 if key in classified or key in visited or key in seen:
                     continue
-                if '[' in c['url'] and not keeps_parent_facets(c['url'], found_on or parent):
+                if '[' in unquote(c['url']) and not c.get('facet_chosen') \
+                        and not keeps_parent_facets(c['url'], found_on or parent):
                     continue
                 if not _is_safe_url(c['url']):
                     guard['unsafe_urls'] += 1
@@ -902,6 +926,35 @@ def jev_crawl(
                 paths_queued[paging_identity(sess.page.url, frozenset(kept_facets))] += 1
         return *found, info
 
+    def pick_facets(links: list[dict], page_url: str, title: str, listed: list[str]) -> tuple[list[dict], dict]:
+        """Of a listing's facet links, keep the ones the judge picks and drop the rest. Returns the links to queue
+        and what was asked: {facet key: picked value or None}."""
+        groups = facet_groups(page_url, links)
+        if not groups:
+            return links, {}
+        filters, options = [], {}
+        for i, (key, group) in enumerate(groups.items()):
+            names = []
+            for link in group:
+                name = clean_text(link.get('name') or '') or parse_qsl(urlparse(link['url']).query)[-1][1]
+                names.append(name if name not in names else f'{name} ({len(names)})')
+            options[f'fa{i}'] = (key, group, names[:MAX_FILTER_OPTIONS])
+            filters.append({'id': f'fa{i}', 'label': key, 'current': '', 'options': names[:MAX_FILTER_OPTIONS]})
+        picks = judge.filter_values(goal, {'page_url': page_url, 'page_title': clean_text(title),
+                                         'documents_listed_now': listed[:15]}, filters)
+        chosen: set[str] = set()
+        info = {key: None for key, _, _ in options.values()}
+        for fid, (value, _) in picks.items():
+            key, group, names = options[fid]
+            link = group[names.index(value)]
+            link['facet_chosen'] = True
+            chosen.add(link['url'])
+            info[key] = value
+            with lock:
+                kept_facets.update(_listing_facets(link['url']))
+        facet_urls = {link['url'] for group in groups.values() for link in group}
+        return [link for link in links if link['url'] not in facet_urls or link['url'] in chosen], info
+
     def behind_own_form(url: str) -> bool:
         """The page is a listing the crawl's own form produced (or a next page of it): its form is already set."""
         facets = _listing_facets(url)
@@ -1124,6 +1177,9 @@ def jev_crawl(
                 harvested = [d['name'] or d['url'].rsplit('/', 1)[-1] for d in docs]
                 accepted, kept = add_candidates(docs, 'page', url, f'{title} ({url})')
                 record['accepted'], record['kept'] = accepted, kept
+                page_links, record['facets'] = pick_facets(page_links, url, title, harvested)
+                if not record['facets']:
+                    del record['facets']
                 new_pages = add_pages(page_links, depth + 1, url) if depth < max_depth else 0
                 record['harvest'] = {'documents': len(docs), 'new_pages': new_pages}
                 recipe = recipes.load(url) if recipes else None

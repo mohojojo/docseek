@@ -812,6 +812,33 @@ class TestCanonical:
         assert canonical('https://site-lv.example/en/?view=docs&start=0#top') == canonical('https://site-lv.example/en/?view=docs')
 
 
+class TestFacetGroups:
+    """A listing's facet links are a filter the page offers as links: grouped per parameter, three or more."""
+
+    LIBRARY = 'https://site-eu.example/databases-library/esma-library'
+
+    def test_encoded_and_plain_brackets_group_under_one_key(self):
+        from docseek.jev_crawl import facet_groups
+        links = [{'url': f'{self.LIBRARY}?f%5B0%5D=basic_%3A45', 'name': 'Guidelines (448)'},
+                 {'url': f'{self.LIBRARY}?f[0]=basic_:40', 'name': 'Opinions (120)'},
+                 {'url': f'{self.LIBRARY}?f%5B0%5D=basic_%3A44', 'name': 'Reports (31)'},
+                 {'url': f'{self.LIBRARY}?page=2', 'name': '2'},
+                 {'url': 'https://site-eu.example/about', 'name': 'About'}]
+        groups = facet_groups(self.LIBRARY, links)
+        assert list(groups) == ['f[]'] and [l['name'] for l in groups['f[]']] == ['Guidelines (448)', 'Opinions (120)', 'Reports (31)']
+
+    def test_a_changed_value_of_the_listings_own_facet_is_a_sibling(self):
+        from docseek.jev_crawl import facet_groups
+        page = f'{self.LIBRARY}?f%5B0%5D=basic_%3A45'
+        links = [{'url': f'{self.LIBRARY}?f%5B0%5D=basic_%3A{n}', 'name': str(n)} for n in (40, 44, 47)]
+        assert len(facet_groups(page, links)['f[]']) == 3
+
+    def test_fewer_than_three_or_another_path_is_no_filter(self):
+        from docseek.jev_crawl import facet_groups
+        assert facet_groups(self.LIBRARY, [{'url': f'{self.LIBRARY}?f[0]=a', 'name': 'a'}, {'url': f'{self.LIBRARY}?f[0]=b', 'name': 'b'}]) == {}
+        assert facet_groups('https://site-lv.example/lv/', [{'url': f'https://site-lv.example/?doc_issuer={n}', 'name': str(n)} for n in range(4)]) == {}
+
+
 class TestBracketFacets:
     """A bracketed parameter sets a facet and is not followed, except as the next page of a listing already behind it."""
 
