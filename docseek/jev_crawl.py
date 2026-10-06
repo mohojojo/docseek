@@ -1209,6 +1209,13 @@ def jev_crawl(
                         and escalations.get('filtered_listing', 0) >= MAX_FILTERED_LISTING_ESCALATIONS):
                     record['trigger_skipped'] = trigger    # the budget is better spent on more pages
                     trigger = None
+                with lock:
+                    form_set = bool(form_facets)
+                if trigger in ('filtered_listing', 'typed_form') and (behind or form_set):
+                    # the site's form has been set by the model once; an agent sent to set it again on another copy
+                    # of the listing spent a minute and, on one site, picked the wrong document type
+                    record['trigger_skipped'] = trigger
+                    trigger = None
         except Exception as exc:  # noqa: BLE001 - one bad page must not end the crawl
             if 'Download is starting' in str(exc):
                 # The "page" is a file the probe did not catch. It cost a visit; do not also lose it.
