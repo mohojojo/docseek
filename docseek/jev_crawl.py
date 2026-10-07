@@ -29,7 +29,7 @@ import httpx
 
 from .agent import (
     _SYSTEM_BLOCKS, agent_llm, _is_binary, _is_safe_url, _strip_fragment, _url_allowed_by_robots, _visit_page,
-    agentic_crawl, fetch_sitemap,
+    agentic_crawl, fetch_sitemap_entries,
 )
 from .api_mining import mine_documents
 from .document_probe import DocumentProbe
@@ -40,9 +40,12 @@ from .judge import MAX_FILTER_OPTIONS, RelevanceJudge, make_judge, verdict_for
 from .llm import LLMClient
 from .models import AgenticCrawlResult, AgenticDownload
 from .proxy import (
-    CHALLENGE_HOSTS, browser_context, close_context, http_proxy, launch_browser, sync_playwright, wait_out_challenge,
+    CHALLENGE_HOSTS, browser_context, close_context, http_proxy, launch_browser, record_challenge, starting_browser,
+    sync_playwright, use_browser, wait_out_challenge,
 )
 from .reach import OffDomainPolicy, bare_host, is_crawlable  # noqa: F401 - re-exported
+from .paths import is_planned, plan_paths, rank_by_paths
+from .patterns import PatternStore
 from .recipes import RecipeStore, recipe_from_steps, replay as replay_recipe
 from .series import date_of, period_of  # noqa: F401 - re-exported: the period Facet is read by docseek.series
 from .scraper import (
@@ -623,6 +626,7 @@ def jev_crawl(
     frontier = Frontier(frontier_policy)
     probe = DocumentProbe(user_agent, lambda u: is_crawlable(u) and may_return(u))
     queued_from: dict[str, tuple[dict, str | None]] = {}   # a queued link and the page it was found on
+    path_plan = {'prefer': [], 'skip': []}   # the goal-to-path plan, filled in pre-crawl (docseek.paths)
     json_prefixes: set[str] = set()      # what this site puts in front of the relative paths in its JSON
     recipes = RecipeStore(recipes_dir) if recipes_dir else None   # replay paid escalations
     classified: set[str] = set()
@@ -718,7 +722,8 @@ def jev_crawl(
                 queued_from[c['url']] = (c, parent)
                 frontier.add(c['url'], kind=kind, probability=probability, depth=depth, other_language=other,
                              path_seen=variants > 0, group=c.get('path', ''), parent=parent,
-                             goal_year=names_goal_year(c, years), revealed=revealed, chrome=bool(c.get('chrome')))
+                             goal_year=names_goal_year(c, years), revealed=revealed, chrome=bool(c.get('chrome')),
+                             planned=is_planned(c['url'], path_plan['prefer']))
                 queued += 1
         return queued
 
@@ -763,11 +768,14 @@ def jev_crawl(
     except Exception as exc:  # noqa: BLE001 - mining is best-effort
         logger.warning('[jev] api mining failed: %s', exc)
     try:
-        sitemap_urls = [u for u in fetch_sitemap(final_url) if same_site(u)][:SITEMAP_CAP]  # seed host only
+        sitemap_entries = [e for e in fetch_sitemap_entries(final_url) if same_site(e['url'])][:SITEMAP_CAP]
     except Exception as exc:  # noqa: BLE001
         logger.warning('[jev] sitemap fetch failed: %s', exc)
-        sitemap_urls = []
-    sitemap_docs = [{'url': u, 'name': ''} for u in sitemap_urls if looks_like_document(u)]
+        sitemap_entries = []
+    sitemap_urls = [e['url'] for e in sitemap_entries]
+    # a sitemap's lastmod is the only date a sitemap document comes with: it reads as its published Facet
+    sitemap_docs = [{'url': e['url'], 'name': '', 'dated': e['lastmod'] or ''} for e in sitemap_entries
+                    if looks_like_document(e['url'])]
     add_candidates(sitemap_docs, 'sitemap', final_url, 'sitemap')
     # the seed's own facets are the caller's intent (a date range, a document type): pages that share
     # them are the listing the caller asked for, not variants of the unfiltered one
@@ -777,17 +785,58 @@ def jev_crawl(
     frontier.add_seed(final_url)
     # Every sitemap document is judged, but only the first N page URLs are worth a question: scoring a large
     # sitemap's page URLs once took a big share of the time budget and found nothing.
-    sitemap_pages = sitemap_page_urls(sitemap_urls)
+    # Which N: the pages under the paths a model picked for the goal from the site's own prefixes come first,
+    # the ones it ruled out last. An order, not a filter - and kept per site, so a repeated goal costs no call.
+    if len(sitemap_urls) > SITEMAP_PAGES_SCORED // 10:
+        patterns = PatternStore(recipes_dir) if recipes_dir else None
+        path_plan.update((patterns.path_plan(seed['host'], goal) if patterns else None)
+                         or plan_paths(agent, goal, sitemap_urls))
+        if patterns and (path_plan['prefer'] or path_plan['skip']):
+            patterns.save_path_plan(seed['host'], goal, path_plan)
+    sitemap_pages = sitemap_page_urls(rank_by_paths(sitemap_urls, path_plan['prefer'], path_plan['skip'], years))
     add_pages([{'url': u, 'name': ''} for u in sitemap_pages], 0)
     emit({'type': 'jev_pre_crawl', 'api_candidates': api_candidates, 'sitemap_urls': len(sitemap_urls),
           'sitemap_documents': len(sitemap_docs), 'sitemap_pages_scored': len(sitemap_pages),
-          'frontier': len(frontier)})
+          'path_plan': path_plan, 'frontier': len(frontier)})
 
     # --- browser sessions ----------------------------------------------------------------
     local = threading.local()
+    # the plain local browser under BROWSER_DEFAULT=local, until the site shows a challenge (then every worker
+    # moves to the environment's strongest, and the site is remembered in recipes_dir)
+    browser = {'strategy': starting_browser(bare_host(seed['host']), recipes_dir)}
+
+    def close_session() -> None:
+        for attr in ('context', 'browser', 'playwright'):
+            try:
+                obj = getattr(local, attr)
+                (close_context if attr == 'context' else lambda o: o.stop() if attr == 'playwright' else o.close())(obj)
+            except Exception:  # noqa: BLE001 - a browser that is gone is closed
+                pass
+        for attr in ('page', 'context', 'browser', 'playwright'):
+            if hasattr(local, attr):
+                delattr(local, attr)
+
+    def escalate_browser() -> bool:
+        """The site showed a challenge the plain browser cannot pass: move this crawl to the strongest browser.
+        False when it is on it already."""
+        if browser['strategy'] != 'local':
+            return False
+        with lock:
+            browser['strategy'] = None
+        record_challenge(bare_host(seed['host']), recipes_dir)
+        logger.info('[challenge] %s: moving the crawl to the %s browser', seed['host'], browser_strategy_name())
+        return True
+
+    def browser_strategy_name() -> str:
+        from .proxy import strongest
+        return strongest()
 
     def session():
+        if hasattr(local, 'page') and getattr(local, 'strategy', None) != browser['strategy']:
+            close_session()                   # another worker escalated: this one follows
         if not hasattr(local, 'page'):
+            local.strategy = browser['strategy']
+            use_browser(local.strategy)
             local.playwright = sync_playwright().start()
             local.browser = launch_browser(local.playwright, headless)
             local.context = browser_context(local.browser, user_agent=user_agent, accept_downloads=True)
@@ -1114,7 +1163,11 @@ def jev_crawl(
         try:
             sess.json_bodies.clear()
             sess.page.goto(url, wait_until='domcontentloaded', timeout=30_000)
-            wait_out_challenge(sess.page)
+            if not wait_out_challenge(sess.page) and escalate_browser():
+                sess = session()              # on the strong browser now: this page once more
+                sess.json_bodies.clear()
+                sess.page.goto(url, wait_until='domcontentloaded', timeout=30_000)
+                wait_out_challenge(sess.page)
             if not sess.cookies_done:
                 sess.cookies_done = True
                 _try_accept_cookies(sess.page, wait_ms=500)

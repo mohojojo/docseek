@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import gzip
 import json
 import logging
 import re
@@ -897,76 +898,121 @@ def _fast_harvest(
     return _FastHarvestResult(downloads=downloads, queue_entries=new_queue, needs_playwright=needs_playwright)
 
 
-def _parse_sitemap_xml(xml_text: str) -> tuple[list[str], list[str]]:
-    """Parse sitemap XML. Returns (page_urls, child_sitemap_urls)."""
-    page_locs: list[str] = []
+SITEMAP_FILES = 25          # sitemaps read per site: an index of thousands of monthly sitemaps is not worth the time
+_SITEMAP_NAMES = ('sitemap.xml', 'sitemap_index.xml', 'sitemap-index.xml', 'sitemap/sitemap.xml', 'sitemap.xml.gz')
+
+
+def _parse_sitemap_xml(xml_text: str) -> tuple[list[dict], list[str]]:
+    """Parse sitemap XML. Returns (entries, child_sitemap_urls); an entry is {url, lastmod} with lastmod the
+    sitemap's own date for the page or document, or None."""
+    entries: list[dict] = []
     child_locs: list[str] = []
     try:
         root = ET.fromstring(xml_text)
         root_tag = root.tag.split('}')[-1] if '}' in root.tag else root.tag
-        locs = [
-            el.text.strip()
-            for el in root.iter()
-            if el.tag.split('}')[-1] == 'loc' and el.text and el.text.strip()
-        ]
-        if root_tag == 'sitemapindex':
-            child_locs = locs
-        else:
-            page_locs = locs
+        for item in root:
+            fields = {child.tag.split('}')[-1]: (child.text or '').strip() for child in item}
+            if not fields.get('loc'):
+                continue
+            if root_tag == 'sitemapindex':
+                child_locs.append(fields['loc'])
+            else:
+                entries.append({'url': fields['loc'], 'lastmod': fields.get('lastmod') or None})
     except ET.ParseError as exc:
         logger.debug('Sitemap XML parse error: %s', exc)
-    return page_locs, child_locs
+    return entries, child_locs
 
 
-def _fetch_and_parse_sitemap(url: str, timeout: int) -> tuple[list[str], list[str]]:
-    """Fetch a single sitemap URL. Returns (page_urls, child_sitemap_urls)."""
+def _read_sitemap(url: str, timeout: int) -> str:
+    """A sitemap's text, gunzipped when it is served compressed (.xml.gz, or a gzip body either way)."""
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept-Encoding': 'gzip'})
+    with proxied_urlopen(req, timeout=timeout) as r:
+        raw = r.read()
+    if raw[:2] == b'\x1f\x8b':
+        raw = gzip.decompress(raw)
+    return raw.decode('utf-8', errors='replace')
+
+
+def _fetch_and_parse_sitemap(url: str, timeout: int) -> tuple[list[dict], list[str]]:
+    """Fetch a single sitemap URL. Returns (entries, child_sitemap_urls); ([], []) when it cannot be read."""
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with proxied_urlopen(req, timeout=timeout) as r:
-            xml_text = r.read().decode('utf-8', errors='replace')
-        return _parse_sitemap_xml(xml_text)
-    except Exception as exc:
+        return _parse_sitemap_xml(_read_sitemap(url, timeout))
+    except Exception as exc:  # noqa: BLE001 - a sitemap that cannot be read is no sitemap
         logger.debug('Sitemap fetch failed for %s: %s', url, exc)
         return [], []
 
 
-def fetch_sitemap(seed_url: str, timeout: int = 5) -> list[str]:
-    """Return all page URLs from the site's sitemap (via robots.txt or /sitemap.xml).
+def _walk_sitemaps(roots: list[str], timeout: int) -> list[dict]:
+    """Every entry under `roots`, following sitemap indexes to any depth, at most SITEMAP_FILES sitemaps."""
+    entries: list[dict] = []
+    queue, seen = list(roots), set()
+    while queue and len(seen) < SITEMAP_FILES:
+        sm_url = queue.pop(0)
+        if sm_url in seen:
+            continue
+        seen.add(sm_url)
+        found, children = _fetch_and_parse_sitemap(sm_url, timeout)
+        entries.extend(found)
+        queue.extend(c for c in children if c not in seen)
+    if queue:
+        logger.info('[sitemap] %d more sitemaps under %s left unread (cap %d)', len(queue), roots[0], SITEMAP_FILES)
+    return entries
 
-    Side-effect: stores the seed's robots.txt in docseek.reach, so the first robots check needs no second fetch.
-    Also probes /llms.txt for LLM-curated URL listings.
+
+def _parent_domain(host: str) -> str | None:
+    """The domain one label up (alapok.raiffeisen.hu -> raiffeisen.hu): where a subdomain's sitemap often is."""
+    labels = host.split('.')
+    return '.'.join(labels[1:]) if len(labels) > 2 else None
+
+
+def fetch_sitemap_entries(seed_url: str, timeout: int = 5) -> list[dict]:
+    """Every URL the site's sitemaps list, as {url, lastmod}, plus what /llms.txt lists (lastmod None).
+
+    The sitemaps come from robots.txt's Sitemap lines; without those, the usual names are tried in turn
+    (sitemap.xml, sitemap_index.xml, ..., sitemap.xml.gz) and the first that answers is used. Indexes are
+    followed to any depth, gzip is unpacked, and a subdomain with no sitemap of its own falls back to its
+    parent domain's (callers keep what is on their site). Side-effect: stores the seed's robots.txt in
+    docseek.reach, so the first robots check needs no second fetch.
     """
     parsed = urlparse(seed_url)
     base = f'{parsed.scheme}://{parsed.netloc}'
-    candidates: list[str] = []
-
+    roots: list[str] = []
     try:
         req = urllib.request.Request(f'{base}/robots.txt', headers={'User-Agent': 'Mozilla/5.0'})
         with proxied_urlopen(req, timeout=timeout) as r:
             robots_lines = r.read().decode('utf-8', errors='replace').splitlines()
         for line in robots_lines:
             if line.lower().startswith('sitemap:'):
-                candidates.append(line.split(':', 1)[1].strip())
+                roots.append(line.split(':', 1)[1].strip())
         store_robots(parsed.netloc, robots_lines)
-    except Exception:
+    except Exception:  # noqa: BLE001 - no robots.txt, or unreachable: the usual names are tried
         pass
 
-    if not candidates:
-        candidates.append(f'{base}/sitemap.xml')
+    entries = _walk_sitemaps(roots, timeout) if roots else []
+    if not entries:
+        for name in _SITEMAP_NAMES:
+            entries = _walk_sitemaps([f'{base}/{name}'], timeout)
+            if entries:
+                break
+    parent = _parent_domain(parsed.netloc)
+    if not entries and parent:
+        for name in _SITEMAP_NAMES[:2]:
+            entries = _walk_sitemaps([f'{parsed.scheme}://{parent}/{name}', f'{parsed.scheme}://www.{parent}/{name}'],
+                                     timeout)
+            if entries:
+                logger.info('[sitemap] %s has no sitemap; using %s\'s', parsed.netloc, parent)
+                break
 
-    all_locs: list[str] = []
-    child_sitemaps: list[str] = []
-    for sm_url in candidates:
-        locs, children = _fetch_and_parse_sitemap(sm_url, timeout)
-        all_locs.extend(locs)
-        child_sitemaps.extend(children)
+    entries += [{'url': u, 'lastmod': None} for u in _fetch_llms_txt(base, timeout)]
+    seen: dict[str, dict] = {}
+    for e in entries:
+        seen.setdefault(e['url'], e)
+    return list(seen.values())
 
-    for sm_url in child_sitemaps:
-        locs, _ = _fetch_and_parse_sitemap(sm_url, timeout)
-        all_locs.extend(locs)
 
-    all_locs.extend(_fetch_llms_txt(base, timeout))
-    return list(dict.fromkeys(all_locs))
+def fetch_sitemap(seed_url: str, timeout: int = 5) -> list[str]:
+    """Return all page URLs from the site's sitemaps and /llms.txt: fetch_sitemap_entries without the dates."""
+    return [e['url'] for e in fetch_sitemap_entries(seed_url, timeout)]
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ Read on every call, so a server picks up a change on its next crawl.
 from __future__ import annotations
 
 import logging
+import contextvars
 import os
 import sys
 import time
@@ -71,11 +72,64 @@ def urlopen(request: urllib.request.Request, timeout: float):
     return opener.open(request, timeout=timeout)
 
 
+# --- which browser: the environment's strongest, or a plain local one until a site shows it needs more ---------
+# BROWSER_CDP_URL and BROWSER_STEALTH name the strongest browser available. By default every crawl uses it. With
+# BROWSER_DEFAULT=local, a crawl starts on the plain local Chromium (cheap, fast) and moves to the strong one only
+# for a site that has shown Cloudflare's challenge: once seen, the site is recorded in the patterns dir and later
+# crawls of it start strong. The choice is per thread (contextvars), so parallel crawls do not share it.
+
+_forced: contextvars.ContextVar[str | None] = contextvars.ContextVar('browser_strategy', default=None)
+
+
+def strongest() -> str:
+    """The strongest browser the environment offers: 'remote', 'stealth' or 'local'."""
+    if (os.getenv('BROWSER_CDP_URL') or '').strip():
+        return 'remote'
+    if (os.getenv('BROWSER_STEALTH') or '').strip().lower() in ('1', 'true', 'yes'):
+        return 'stealth'
+    return 'local'
+
+
+def use_browser(strategy: str | None) -> None:
+    """Force this thread's browser: 'local' for the plain Chromium whatever the environment offers, None for the
+    environment's strongest."""
+    _forced.set(strategy)
+
+
+def browser_strategy() -> str:
+    """This thread's browser: what use_browser forced, else the environment's strongest."""
+    return _forced.get() or strongest()
+
+
+def starting_browser(host: str, patterns_dir: str | None) -> str | None:
+    """What a crawl of `host` starts on: None (the strongest) unless BROWSER_DEFAULT=local and the host has not
+    been seen behind a challenge, in which case 'local'. Nothing to choose when only a local browser exists."""
+    if (os.getenv('BROWSER_DEFAULT') or '').strip().lower() != 'local' or strongest() == 'local':
+        return None
+    if patterns_dir:
+        from .patterns import PatternStore
+        known = PatternStore(patterns_dir).load(host)
+        if known and known.challenge_seen:
+            return None
+    return 'local'
+
+
+def record_challenge(host: str, patterns_dir: str | None) -> None:
+    """Remember that `host` showed a challenge, so later crawls of it start on the strong browser."""
+    if patterns_dir:
+        from .patterns import PatternStore
+        PatternStore(patterns_dir).record_challenge(host, browser_strategy())
+
+
 def _cdp_url() -> str:
+    if _forced.get() == 'local':
+        return ''
     return (os.getenv('BROWSER_CDP_URL') or '').strip()
 
 
 def _stealth() -> bool:
+    if _forced.get() == 'local':
+        return False
     return (os.getenv('BROWSER_STEALTH') or '').strip().lower() in ('1', 'true', 'yes') and not _cdp_url()
 
 

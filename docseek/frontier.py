@@ -45,7 +45,7 @@ DRY_PAGES = 7             # replayed on recorded sites: a shorter dry run alread
 
 def frontier_key(kind: str, probability: float, depth: int, other_language: bool, order: int,
                  path_seen: bool = False, goal_year: bool = False, revealed: bool = False,
-                 chrome: bool = False, listing_first: bool = False) -> tuple:
+                 chrome: bool = False, listing_first: bool = False, planned: bool = False) -> tuple:
     """Tier ordering: goal language, then tier, then the goal's year, then unseen paths, then P(kind), depth,
     discovery order.
 
@@ -62,6 +62,10 @@ def frontier_key(kind: str, probability: float, depth: int, other_language: bool
     goal asked for, whatever kind each looks like (a filing titled like a news item is one), and go before everything
     else: the unfiltered listing's newest items name this year too, and ranked level with them a 10-page crawl never
     reached one.
+
+    `planned`: the page sits under a path the goal-to-path plan (docseek.paths) named for the goal, from the
+    site's own sections. Within its tier it comes after a revealed or goal-year page and before the rest: a
+    sitemap lists every product's page, and the crawl should read the goal's category before the others.
 
     `chrome`: the link sits in the site's menus, header, footer or a sidebar and nowhere in the page's content (a
     paginator is content). Within a tier the content's links come first (`content_first`, the default): a hub page's
@@ -83,8 +87,8 @@ def frontier_key(kind: str, probability: float, depth: int, other_language: bool
     # a menu names every subject; a content link to one subject's page is the page's own pointer. A menu's link to a
     # document listing keeps its rank: that is where sites put their document sections, and one regulator's
     # notices listing, reached only from the menu, held a fifth of its decisions.
-    return (1 if other_language else 0, tier, 0 if revealed else 1 if goal_year else 2, listing, 1 if chrome else 0,
-            1 if path_seen else 0, -probability, depth, order)
+    return (1 if other_language else 0, tier, 0 if revealed else 1 if goal_year else 2 if planned else 3, listing,
+            1 if chrome else 0, 1 if path_seen else 0, -probability, depth, order)
 
 
 def url_template(url: str) -> str:
@@ -133,10 +137,10 @@ class Frontier:
 
     def add(self, url: str, *, kind: str, probability: float, depth: int, other_language: bool = False,
             path_seen: bool = False, group: str = '', parent: str | None = None, goal_year: bool = False,
-            revealed: bool = False, chrome: bool = False) -> None:
+            revealed: bool = False, chrome: bool = False, planned: bool = False) -> None:
         group = group or url_template(url)
         key = frontier_key(kind, probability, depth, other_language, self._order + 1, path_seen, goal_year, revealed,
-                           chrome and self.content_first, self.listing_first)
+                           chrome and self.content_first, self.listing_first, planned)
         tier = key[1]
         if group not in self.groups:
             self.groups[group] = _Group()

@@ -265,3 +265,53 @@ def test_browser_stealth_clicks_the_challenge_checkbox(monkeypatch):
     page = CheckboxPage()
     assert proxy.wait_out_challenge(page)
     assert page.clicks == [(130, 230)]
+
+
+# --- which browser: the environment's strongest, or local until a site shows a challenge ------------------------
+
+@pytest.fixture(autouse=True)
+def _env_browser(monkeypatch):
+    monkeypatch.delenv('BROWSER_STEALTH', raising=False)
+    monkeypatch.delenv('BROWSER_DEFAULT', raising=False)
+    proxy.use_browser(None)
+
+
+def test_the_strongest_browser_is_remote_then_stealth_then_local(monkeypatch):
+    assert proxy.strongest() == 'local'
+    monkeypatch.setenv('BROWSER_STEALTH', '1')
+    assert proxy.strongest() == 'stealth'
+    monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
+    assert proxy.strongest() == 'remote'
+
+
+def test_forcing_local_hides_the_remote_and_stealth_browsers_from_this_thread(monkeypatch):
+    monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
+    monkeypatch.setenv('BROWSER_STEALTH', '1')
+    proxy.use_browser('local')
+    assert proxy._cdp_url() == '' and proxy._stealth() is False and proxy.browser_strategy() == 'local'
+    proxy.use_browser(None)
+    assert proxy._cdp_url() == 'wss://remote.example' and proxy.browser_strategy() == 'remote'
+
+
+def test_by_default_every_crawl_starts_on_the_strongest_browser(monkeypatch, tmp_path):
+    monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
+    assert proxy.starting_browser('site.example', str(tmp_path)) is None
+
+
+def test_browser_default_local_starts_local_until_the_site_shows_a_challenge(monkeypatch, tmp_path):
+    monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
+    monkeypatch.setenv('BROWSER_DEFAULT', 'local')
+    assert proxy.starting_browser('site.example', str(tmp_path)) == 'local'
+    proxy.use_browser('local')
+    proxy.record_challenge('site.example', str(tmp_path))
+    assert proxy.starting_browser('site.example', str(tmp_path)) is None     # remembered
+    assert proxy.starting_browser('other.example', str(tmp_path)) == 'local'
+    from docseek.patterns import PatternStore
+    known = PatternStore(str(tmp_path)).load('site.example')
+    assert known.challenge_seen is not None and known.challenge_passed_with == 'local'
+
+
+def test_with_only_a_local_browser_there_is_nothing_to_choose(monkeypatch, tmp_path):
+    monkeypatch.setenv('BROWSER_DEFAULT', 'local')
+    assert proxy.starting_browser('site.example', str(tmp_path)) is None
+    proxy.record_challenge('site.example', None)                              # no patterns dir: nothing kept

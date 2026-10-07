@@ -11,6 +11,7 @@ while rendering, saved with the program):
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 from urllib.parse import urlparse
@@ -18,7 +19,10 @@ from urllib.parse import urlparse
 import httpx
 
 from ..jev_crawl import _HARVEST_JS, BLOCKED_RESOURCES
-from ..proxy import http_proxy, launch_browser, new_page, sync_playwright, wait_out_challenge
+from ..proxy import (
+    http_proxy, launch_browser, new_page, record_challenge, starting_browser, sync_playwright, use_browser,
+    wait_out_challenge,
+)
 from ..reach import bare_host, is_safe_url, robots_allows
 from ..scraper import _DEFAULT_USER_AGENT, _try_accept_cookies
 from .sandbox import FetchRefused
@@ -55,8 +59,11 @@ def endpoint_of(url: str) -> str:
 class Fetcher:
     def __init__(self, start_url: str, *, max_requests: int = 400, max_renders: int = 40,
                  data_hosts: set[str] | None = None, post_endpoints: set[str] | None = None,
-                 user_agent: str = _DEFAULT_USER_AGENT):
+                 user_agent: str = _DEFAULT_USER_AGENT, patterns_dir: str | None = None):
         self.site = site_of(urlparse(start_url).netloc)
+        # the browser the site is known to need (docseek.proxy): PATTERNS_DIR is where that is remembered
+        self.patterns_dir = patterns_dir if patterns_dir is not None else os.environ.get('PATTERNS_DIR')
+        self.strategy = starting_browser(self.site, self.patterns_dir)
         self.data_hosts: set[str] = set(data_hosts or ())
         self.post_endpoints: set[str] = set(post_endpoints or ())
         self.max_requests, self.max_renders = max_requests, max_renders
@@ -137,6 +144,7 @@ class Fetcher:
             raise FetchRefused(f'render budget of {self.max_renders} spent')
         self.renders += 1
         if self._browser is None:
+            use_browser(self.strategy)
             self._pw = sync_playwright().start()
             self._browser = launch_browser(self._pw)
         page = new_page(self._browser, self.user_agent)
@@ -144,6 +152,29 @@ class Fetcher:
         page.route('**/*', lambda route, request: route.abort() if request.resource_type in BLOCKED_RESOURCES
                    else route.continue_())
         return page
+
+    def _goto(self, page, url: str, timeout: int = 45_000):
+        """Load `url`; when the page is a challenge the plain browser cannot pass, move to the strongest browser
+        (remembering the site) and load it once more. Returns (response, page): the page may be a new one."""
+        resp = page.goto(url, wait_until='domcontentloaded', timeout=timeout)
+        if wait_out_challenge(page) or self.strategy != 'local':
+            return resp, page
+        record_challenge(self.site, self.patterns_dir)
+        self.strategy = None
+        page.close()
+        self._close_browser()
+        page = self._new_page()
+        resp = page.goto(url, wait_until='domcontentloaded', timeout=timeout)
+        wait_out_challenge(page)
+        return resp, page
+
+    def _close_browser(self) -> None:
+        for obj in (self._browser, self._pw):
+            try:
+                (obj.close if obj is self._browser else obj.stop)()
+            except Exception:  # noqa: BLE001 - gone already
+                pass
+        self._browser = self._pw = None
 
     def render(self, url: str) -> dict:
         """{url, status, html, links, requests}: the page after its scripts ran, the crawler's harvest of its links,
@@ -157,8 +188,7 @@ class Fetcher:
                 'content_type': r.headers.get('content-type', '').split(';')[0]})
                 if r.request.resource_type in ('xhr', 'fetch') and len(calls) < 80 else None)
             try:
-                resp = page.goto(url, wait_until='domcontentloaded', timeout=45_000)
-                wait_out_challenge(page)
+                resp, page = self._goto(page, url)
                 page.wait_for_timeout(RENDER_WAIT_MS)
                 _try_accept_cookies(page)
                 self.check(page.url)
@@ -182,8 +212,7 @@ class Fetcher:
                 if r.request.resource_type in ('xhr', 'fetch') and len(calls) < 120 else None)
             done = []
             try:
-                page.goto(url, wait_until='domcontentloaded', timeout=45_000)
-                wait_out_challenge(page)
+                _, page = self._goto(page, url)
                 page.wait_for_timeout(RENDER_WAIT_MS)
                 _try_accept_cookies(page)
                 self.check(page.url)
@@ -228,5 +257,4 @@ class Fetcher:
     def close(self) -> None:
         self._client.close()
         if self._browser:
-            self._browser.close()
-            self._pw.stop()
+            self._close_browser()

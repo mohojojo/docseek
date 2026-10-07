@@ -33,6 +33,8 @@ class DomainPatterns(BaseModel):
     gate_sequences: list[GateSequence] = Field(default_factory=list)
     memory_snapshot: dict[str, str] = Field(default_factory=dict)
     navigation_hints: str = ''
+    challenge_seen: datetime | None = None      # the site showed Cloudflare's challenge page (docseek.proxy)
+    challenge_passed_with: str | None = None    # the browser that was on when it was last seen: remote / stealth / local
 
 
 class PatternStore:
@@ -94,6 +96,8 @@ class PatternStore:
 
             merged = DomainPatterns(
                 domain=existing.domain,
+                challenge_seen=existing.challenge_seen,
+                challenge_passed_with=existing.challenge_passed_with,
                 updated_at=datetime.now(timezone.utc),
                 successful_crawl_count=existing.successful_crawl_count + 1,
                 last_goal=new.last_goal or existing.last_goal,
@@ -104,6 +108,26 @@ class PatternStore:
                 navigation_hints=new.navigation_hints or existing.navigation_hints,
             )
         self.save(merged)
+
+    def path_plan(self, domain: str, goal: str) -> dict[str, list[str]] | None:
+        """The path plan kept for `domain` when it was made for this goal, else None."""
+        known = self.load(domain)
+        if known and known.last_goal == goal and (known.url_patterns_prefer or known.url_patterns_skip):
+            return {'prefer': known.url_patterns_prefer, 'skip': known.url_patterns_skip}
+        return None
+
+    def save_path_plan(self, domain: str, goal: str, plan: dict[str, list[str]]) -> None:
+        """Keep a path plan for `domain` and `goal`; crawl counts and the rest stay as they are."""
+        existing = self.load(domain) or DomainPatterns(domain=self._normalize_domain(domain))
+        self.save(existing.model_copy(update={'last_goal': goal, 'url_patterns_prefer': plan['prefer'][:_MAX_URL_PATTERNS],
+                                              'url_patterns_skip': plan['skip'][:_MAX_URL_PATTERNS],
+                                              'updated_at': datetime.now(timezone.utc)}))
+
+    def record_challenge(self, domain: str, strategy: str) -> None:
+        """Note that `domain` showed a challenge page and which browser was on at the time. Nothing else changes."""
+        existing = self.load(domain) or DomainPatterns(domain=self._normalize_domain(domain))
+        self.save(existing.model_copy(update={'challenge_seen': datetime.now(timezone.utc),
+                                              'challenge_passed_with': strategy}))
 
     def delete(self, domain: str) -> bool:
         try:

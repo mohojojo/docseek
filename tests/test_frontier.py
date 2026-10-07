@@ -188,3 +188,13 @@ class TestContentFirst:
                      chrome=True)
         frontier.add('https://site-hu.example/table-archive', kind='fund_or_product', probability=0.5, depth=1, group='g')
         assert frontier.pop()[0] == 'https://site-hu.example/menu-fund'
+
+
+
+def test_a_planned_page_leads_its_tier_after_revealed_and_goal_year_pages():
+    plain = frontier_key('fund_or_product', 0.9, 0, False, 0)
+    planned = frontier_key('fund_or_product', 0.6, 0, False, 1, planned=True)
+    year = frontier_key('fund_or_product', 0.5, 0, False, 2, goal_year=True)
+    revealed = frontier_key('fund_or_product', 0.4, 0, False, 3, revealed=True)
+    assert sorted([plain, planned, year, revealed]) == [revealed, year, planned, plain]
+    assert planned[1] == plain[1]                      # an order within the tier, not a promotion
