@@ -45,7 +45,8 @@ def page_of(download, page_numbers: dict[str, int]) -> int:
 
 
 def score_run(downloads: list, page_numbers: dict[str, int], expected: set[str],
-              keep_query: bool = False, identity_re: str | None = None, goal_year: str | None = None) -> dict:
+              keep_query: bool = False, identity_re: str | None = None, goal_year: str | None = None,
+              decoys: set[str] = frozenset()) -> dict:
     if goal_year:
         # what a consumer that asked for one year keeps: that year's documents and the undated ones
         downloads = [d for d in downloads if getattr(d, 'year', None) in (None, str(goal_year))]
@@ -57,8 +58,8 @@ def score_run(downloads: list, page_numbers: dict[str, int], expected: set[str],
     hits = sorted(page_of(d, page_numbers) for d in downloads
                   if d.verdict == 'accepted' and identity(d.url, keep_query, identity_re) in expected)
     return {
-        'accepted': score(pick({'accepted'}), expected),
-        'returned': score(pick(RETURNED_VERDICTS), expected),
+        'accepted': score(pick({'accepted'}), expected, decoys),
+        'returned': score(pick(RETURNED_VERDICTS), expected, decoys),
         'recall_at': {str(n): round(score(pick({'accepted'}, n), expected)['recall'], 3)
                       for n in RECALL_AT_PAGES},
         'pages_to_first_hit': hits[0] if hits else None,
@@ -112,7 +113,7 @@ def run_one(jev_crawl, entry: dict, api_key: str, args, snapshot_dir: Path | Non
                  judge=lambda: make_judge(args.judge, args.profile or entry.get('profile')))
     kept = [d for d in result.downloads if d.latest_in_series is not False] if entry.get('latest') else result.downloads
     run = score_run(kept, page_numbers, entry['expected'], entry.get('keep_query', False),
-                    entry.get('identity_re'), entry.get('goal_year'))
+                    entry.get('identity_re'), entry.get('goal_year'), entry.get('decoys', frozenset()))
     run.update({
         'discarded': result.stop_reason == 'jev_unavailable',
         'stop_reason': result.stop_reason, 'pages': result.pages_visited,
@@ -149,6 +150,8 @@ def summarise(runs: list[dict]) -> dict | None:
         'accepted_precision': stat(lambda r: r['accepted']['precision']),
         'returned_recall': stat(lambda r: r['returned']['recall']),
         'returned_precision': stat(lambda r: r['returned']['precision']),
+        'decoy_share': stat(lambda r: r['accepted'].get('decoy_share') or 0.0)
+        if any(r['accepted'].get('decoys_total') for r in kept) else None,
         'recall_at': {str(n): stat(lambda r, n=n: r['recall_at'][str(n)]) for n in RECALL_AT_PAGES},
         'pages': stat(lambda r: r['pages']), 'elapsed_s': stat(lambda r: r['elapsed_s']),
         'agent_tokens': stat(lambda r: r['agent_tokens']), 'jev_usd': stat(lambda r: r['jev_usd']),
@@ -229,8 +232,8 @@ def main() -> None:
             report['sites'][site]['summary'] = summarise(runs)
             out.write_text(json.dumps(report, indent=1, ensure_ascii=False, default=str))
 
-    print(f'\n{"SITE":<24}{"ACC R":>8}{"ACC P":>8}{"RET P":>8}' + ''.join(f'{"R@" + str(n):>8}' for n in RECALL_AT_PAGES)
-          + f'{"PAGES":>8}{"KEPT":>6}')
+    print(f'\n{"SITE":<24}{"ACC R":>8}{"ACC P":>8}{"RET P":>8}{"DECOY":>8}'
+          + ''.join(f'{"R@" + str(n):>8}' for n in RECALL_AT_PAGES) + f'{"PAGES":>8}{"KEPT":>6}')
     for site, data in report['sites'].items():
         s = data['summary']
         if not s:
@@ -238,6 +241,7 @@ def main() -> None:
             continue
         print(f"{site:<24}{s['accepted_recall']['mean']:>8.2f}{s['accepted_precision']['mean']:>8.2f}"
               f"{s['returned_precision']['mean']:>8.2f}"
+              + (f"{s['decoy_share']['mean']:>8.2f}" if s.get('decoy_share') else f"{'-':>8}")
               + ''.join(f"{s['recall_at'][str(n)]['mean']:>8.2f}" for n in RECALL_AT_PAGES)
               + f"{s['pages']['mean']:>8.1f}{s['runs_kept']:>6}")
     print(f'Report: {out}')

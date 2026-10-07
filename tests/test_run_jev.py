@@ -65,3 +65,30 @@ class TestWiderEval:
         expected = {'https://shop.example/getfile.aspx?id=1', 'https://shop.example/getfile.aspx?id=2'}
         assert score_run(docs, PAGES, expected, keep_query=True)['accepted']['true_positives'] == 2
         assert score_run(docs, PAGES, {'https://shop.example/getfile.aspx'})['accepted']['found_count'] == 1
+
+
+class TestDecoys:
+    def test_returned_decoys_are_counted_in_both_bands(self):
+        decoys = {'https://shop.example/x.pdf', 'https://shop.example/z.pdf'}
+        run = score_run([candidate('a', 'accepted'), candidate('x', 'accepted'), candidate('z', 'unsure')],
+                        PAGES, EXPECTED, decoys=decoys)
+        assert (run['accepted']['decoys_returned'], run['accepted']['decoy_share']) == (1, 0.5)
+        assert (run['returned']['decoys_returned'], run['returned']['decoys_total']) == (2, 2)
+
+    def test_a_site_without_decoys_has_no_share(self):
+        run = score_run([candidate('a', 'accepted')], PAGES, EXPECTED)
+        assert run['accepted']['decoys_total'] == 0 and run['accepted']['decoy_share'] is None
+
+
+def test_identity_re_joins_the_site_and_its_cdn():
+    from eval.run_baseline import identity
+    pattern = r'(?i)(Factsheet-[^/]+)\.pdf$'
+    site = identity('https://www.fund.example/download/hu/Factsheet-India-N(acc)EUR-4345-S.PDF', False, pattern)
+    cdn = identity('https://cdn.example/content/abc/original/Factsheet-India-NaccEUR-4345-S.pdf', False, pattern)
+    assert site == cdn == '#factsheetindianacceur4345s'
+
+
+def test_a_percent_encoded_and_a_raw_name_are_one_document():
+    from eval.run_baseline import identity
+    assert identity('https://cdn.example/o/Funds%2FA%2FAllegro%20B%202026-1.pdf') \
+        == identity('https://cdn.example/o/Funds%2FA%2FAllegro B 2026-1.pdf')

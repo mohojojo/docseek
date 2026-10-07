@@ -30,10 +30,11 @@ ground truth stays local unless you choose to commit it.
 | `site` | yes | The site key. `--sites` selects on it, and it names the site in reports. |
 | `goal` | yes | The natural-language goal passed to the crawler. |
 | `expected_documents` | yes | List of `{url, name}`. Only `url` is scored; `name` is for people. An empty list is allowed: it means the site holds nothing the goal asks for, and every document returned there counts against precision. |
+| `decoy_documents` | no | List of `{url, name, why}`: look-alikes on the site that the goal does **not** ask for (the sibling column, the other category, the English edition). Only `url` is scored. Returning them is the "wrong slice" that overall precision dilutes on a big site; the runners report how many came back. |
 | `start_url` | no | Where `run_jev` seeds the crawl. Default: `https://www.<site>/` (or `https://<site>/` when `site` already starts with `www.`). |
 | `off_domain` | no | `true` lets `run_jev` follow links off the seed host. Use it when the documents live on another host. |
 | `match_query` | no | `true` keeps the query string in a document's identity, for sites that tell documents apart only by query (`getfile.aspx?id=123`). |
-| `identity_re` | no | A regex with one capture group that identifies a document. Use it when one document is served under several URLs (`?download=12:report`, `?download=12:report&start=50`, `/file/12-report`). Matching URLs are compared as `<host>#<group>`; non-matching URLs fall back to the normal rule. |
+| `identity_re` | no | A regex with one capture group that identifies a document. Use it when one document is served under several URLs (`?download=12:report`, `?download=12:report&start=50`, `/file/12-report`), or from the site and from its CDN. Matching URLs are compared by the group alone, lowercased and reduced to letters and digits, with no host; non-matching URLs fall back to the normal rule. |
 | `goal_year` | no | For a goal that asks for one year. `run_jev` then scores only candidates dated that year or undated, as a consumer filtering on the year would. |
 | `latest` | no | `true` for a goal that asks for each series' newest document. The runners then score what `"latest": true` returns: older documents of a series are left out. |
 | `profile` | no | The domain profile the relevance judge words its questions with: a bundled name (`generic`, `fund-reports`) or a path to a profile JSON. Default `generic`. |
@@ -66,6 +67,9 @@ Per run:
 - precision = matched / found (0.0 when nothing was found but something was expected; 1.0 when
   both are empty)
 - `missed` and `extra` list the unmatched identities on each side.
+- `decoys_returned` / `decoys_total` and `decoy_share`: how many of the site's `decoy_documents` came
+  back. Zero is the goal; a program or crawl that returns the wrong column scores 1.0 here while its
+  overall precision may still look fine.
 
 `run_jev` scores every run in two bands, using the judge's relevance score:
 

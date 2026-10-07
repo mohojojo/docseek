@@ -56,12 +56,13 @@ def run_site(entry: dict, store, args) -> dict:
             refine_latest(downloads, entry['goal'], make_judge(args.judge, entry['profile']))
             downloads = [d for d in downloads if d.latest_in_series is not False]
         scored = score_run(downloads, {}, entry['expected'], entry.get('keep_query', False),
-                           entry.get('identity_re'), entry.get('goal_year'))
+                           entry.get('identity_re'), entry.get('goal_year'), entry.get('decoys', frozenset()))
         scored.update({'returned_documents': len(downloads), 'error': run['error'], 'seconds': run['seconds'],
                        'fetches': run['requests'], 'renders': run['renders'], 'fetch_failures': run['fetch_failures']})
         runs.append(scored)
         a = scored['accepted']
-        print(f"    replay {i + 1}: acc R={a['recall']:.2f} P={a['precision']:.2f} | returned {len(downloads)}"
+        decoy = f" decoys {a['decoys_returned']}/{a['decoys_total']}" if a['decoys_total'] else ''
+        print(f"    replay {i + 1}: acc R={a['recall']:.2f} P={a['precision']:.2f}{decoy} | returned {len(downloads)}"
               f" in {run['seconds']} s, {run['requests']} fetches{'  ERROR' if run['error'] else ''}",
               file=sys.stderr, flush=True)
     return {'expected': entry['expected_count'], 'goal': entry['goal'], 'key': key, 'generation': generation,

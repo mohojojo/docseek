@@ -21,7 +21,7 @@ import statistics
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import unquote, urlparse, urlunparse
 
 from docseek.series import apply_latest
 
@@ -40,7 +40,9 @@ def identity(url: str, keep_query: bool = False, identity_re: str | None = None)
     if identity_re:
         m = re.search(identity_re, url)
         if m:
-            return f'{urlparse(url).hostname}#{m.group(1)}'
+            # no host, and only letters and digits: the same document served from the site and from its CDN
+            # ("N(acc)EUR" on one, "NaccEUR" on the other) is one document
+            return '#' + re.sub(r'[^a-z0-9]', '', m.group(1).lower())
     return normalize_url(url, keep_query)
 
 
@@ -57,7 +59,8 @@ def normalize_url(url: str, keep_query: bool = False) -> str:
     host = (p.hostname or '').lower()
     if p.port:
         host = f'{host}:{p.port}'
-    path = p.path.rstrip('/') or '/'
+    # the same document is one key whether its name came percent-encoded or raw ("Allegro%20B" / "Allegro B")
+    path = unquote(p.path).rstrip('/') or '/'
     return urlunparse((p.scheme.lower(), host, path, '', p.query if keep_query else '', ''))
 
 
@@ -74,12 +77,14 @@ def load_ground_truth(sites_filter: list[str] | None) -> list[dict]:
         keep_query = bool(d.get('match_query'))
         identity_re = d.get('identity_re')
         expected = {identity(doc['url'], keep_query, identity_re) for doc in d['expected_documents']}
+        decoys = {identity(doc['url'], keep_query, identity_re) for doc in d.get('decoy_documents', [])} - expected
         entries.append({
             'file': f.name,
             'site': site,
             'goal': d['goal'],
             'expected': expected,
             'expected_count': len(expected),
+            'decoys': decoys,      # look-alikes the goal does not ask for; returning one is the wrong slice
             # optional per-site settings: where to seed the crawl, whether it may leave the seed host,
             # whether the query string is part of a document's identity, and what shape the site tests
             'start_url': d.get('start_url'),
@@ -94,7 +99,7 @@ def load_ground_truth(sites_filter: list[str] | None) -> list[dict]:
     return entries
 
 
-def score(found: set[str], expected: set[str]) -> dict:
+def score(found: set[str], expected: set[str], decoys: set[str] = frozenset()) -> dict:
     tp = len(found & expected)
     # A site that holds nothing the goal asks for is scored too: missing nothing is full recall, and
     # any document returned there is a false accept.
@@ -110,6 +115,11 @@ def score(found: set[str], expected: set[str]) -> dict:
         'f1': f1,
         'missed': sorted(expected - found),
         'extra': sorted(found - expected),
+        # decoys are hand-picked look-alikes (the sibling column, the other category): a share of them
+        # returned measures the wrong slice, which precision over everything the site holds dilutes
+        'decoys_total': len(decoys),
+        'decoys_returned': len(found & decoys),
+        'decoy_share': (len(found & decoys) / len(decoys)) if decoys else None,
     }
 
 
