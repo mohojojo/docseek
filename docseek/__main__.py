@@ -58,8 +58,9 @@ def _discover(argv: list[str]) -> None:
     parser.add_argument('--latest', action='store_true', help='Keep only the newest document of each series')
     parser.add_argument('--format', choices=('json', 'csv'), default='json',
                         help='json: the whole result; csv: one row per document (default: json)')
-    parser.add_argument('--programs', action='store_true',
-                        help="Answer from the site's generated program when it is healthy; after a crawl, write one")
+    parser.add_argument('--programs', action=argparse.BooleanOptionalAction, default=None,
+                        help="Answer from the site's generated program when it is healthy; after a crawl, write one "
+                             '(default: on when a programs dir is set; --no-programs forces a crawl)')
     _programs_dir_arg(parser)
     args = parser.parse_args(argv)
 

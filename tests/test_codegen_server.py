@@ -48,6 +48,19 @@ def test_programs_need_a_programs_dir(client, monkeypatch):
     assert response.status_code == 404 and 'PROGRAMS_DIR' in response.json()['detail']
 
 
+def test_programs_are_the_default_once_a_programs_dir_is_set(client, monkeypatch):
+    monkeypatch.setattr(server, '_run_crawl', crawl_result)
+    body = client.post('/v1/discover', json={'url': URL, 'goal': GOAL}).json()
+    assert body['program'] == {'key': KEY, 'path': 'crawl', 'reason': 'no_program', 'generation': 'no_model'}
+
+
+def test_without_a_programs_dir_the_default_is_a_plain_crawl(client, monkeypatch):
+    monkeypatch.setattr(server, 'PROGRAMS_DIR', None)
+    monkeypatch.setattr(server, '_run_crawl', crawl_result)
+    body = client.post('/v1/discover', json={'url': URL, 'goal': GOAL}).json()
+    assert body['program'] is None and body['downloads'][0]['source'] == 'page'
+
+
 def test_a_healthy_program_answers_and_nothing_is_crawled(client, monkeypatch, tmp_path):
     save_program(tmp_path, last_kept=1)
     monkeypatch.setattr(server, '_run_crawl', lambda *a, **k: pytest.fail('crawled despite a healthy program'))
@@ -81,9 +94,9 @@ def test_without_a_coding_model_the_crawl_still_answers(client, monkeypatch):
     assert body['program']['generation'] == 'no_model' and body['downloads']
 
 
-def test_programs_off_is_a_plain_crawl(client, monkeypatch):
+def test_programs_false_is_a_plain_crawl(client, monkeypatch):
     monkeypatch.setattr(server, '_run_crawl', crawl_result)
-    body = client.post('/v1/discover', json={'url': URL, 'goal': GOAL}).json()
+    body = client.post('/v1/discover', json={'url': URL, 'goal': GOAL, 'programs': False}).json()
     assert body['program'] is None
 
 

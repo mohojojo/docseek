@@ -143,12 +143,12 @@ judge scores what it returns exactly as it scores a crawl.
 ```bash
 export PROGRAMS_DIR=./programs CODEGEN_MODEL=claude-sonnet-5
 docseek generate https://www.example.com/ "Find the 2025 annual reports (PDF)"   # a few minutes, once
-docseek https://www.example.com/ "Find the 2025 annual reports (PDF)" --programs  # seconds, no model
+docseek https://www.example.com/ "Find the 2025 annual reports (PDF)"             # seconds, no model
 docseek check                                                                      # has any site changed?
 ```
 
-With `"programs": true`, `/v1/discover` answers from the site's program when it is **healthy**, and crawls
-otherwise: when the program errors, returns nothing where it used to find documents, or keeps fewer than half of
+Once `PROGRAMS_DIR` is set, `/v1/discover` answers from the site's program when it is **healthy**, and crawls
+otherwise (`"programs": false` forces a crawl): when the program errors, returns nothing where it used to find documents, or keeps fewer than half of
 what it kept last time, it is marked stale, the crawl answers, and a new program is written in the background.
 `docseek check` (or `POST /v1/programs/check`) replays every program against a snapshot of what it returned
 before - no model, no judge - and reports `ok`, `grew`, `shrank` or `broken`.
@@ -193,6 +193,7 @@ Health cannot tell when a program confidently returns the wrong slice of a site;
 | `PROXY_USERNAME`, `PROXY_PASSWORD` | Credentials for `PROXY_SERVER`, if it needs them. Providers that pick the exit country from the username work as they are. |
 | `BROWSER_CDP_URL` | `wss://...` of a remote browser (Oxylabs Headless Browser, Browserless, Browserbase, ...) to crawl with instead of a local Chromium - for sites that need CAPTCHA solving or a residential fingerprint. `PROXY_SERVER` does not apply to it; the plain HTTP fetches still use the proxy. |
 | `BROWSER_STEALTH` | `1`: crawl with a local Google Chrome driven by Patchright, which passes Cloudflare's challenge page. Needs the `stealth` extra and Chrome. `BROWSER_CDP_URL` wins when both are set. |
+| `BROWSER_DEFAULT` | `local`: start every crawl on the plain local Chromium and move to the remote or stealth browser only when the site shows Cloudflare's challenge. The site is then remembered in `PATTERNS_DIR`, and later crawls and programs for it start on the strong browser. Unset: the strongest configured browser is used for everything. |
 
 ### Proxies and remote browsers
 
@@ -247,7 +248,7 @@ Main request fields for `/v1/discover`:
 | `max_pages`, `max_seconds`, `max_depth` | 10, 180, 3 | Crawl budget. |
 | `same_domain_only`, `allowed_hosts` | `true`, `[]` | Off-domain policy: with `same_domain_only: false` the crawl may cross to one host linked from the start site. |
 | `latest` | `false` | Keep only the newest document of each series (see above). |
-| `programs` | `false` | Answer from the site's generated program when it is healthy (needs `PROGRAMS_DIR`). |
+| `programs` | on when `PROGRAMS_DIR` is set | Answer from the site's generated program when it is healthy; `false` forces a crawl. |
 | `include_rejected` | `false` | Also return rejected candidates, to see what the judge threw away. |
 | `model` | `LLM_MODEL` | Agent model override. |
 

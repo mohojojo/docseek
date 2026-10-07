@@ -192,3 +192,10 @@ def test_a_programs_context_reaches_the_judge_even_beside_a_long_title():
     candidate = as_candidates([doc])[0]
     state = link_state('L1', candidate['name'], candidate['url'], candidate['context'], candidate['section'])
     assert "gelistet unter 'Entschließungen'" in state['section_heading']
+
+
+def test_a_programs_url_with_a_space_is_encoded_and_encoded_parts_are_kept():
+    from docseek.codegen.programs import as_url
+    assert as_url('https://cdn.example/o/Funds%2FA%2FAllegro B 2026-1 hu.pdf?alt=media') \
+        == 'https://cdn.example/o/Funds%2FA%2FAllegro%20B%202026-1%20hu.pdf?alt=media'
+    assert as_url('https://site.example/docs/Übersicht.pdf') == 'https://site.example/docs/%C3%9Cbersicht.pdf'

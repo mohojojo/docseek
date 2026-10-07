@@ -124,12 +124,12 @@ class DiscoverRequest(BaseModel):
             'either way; set this when the goal asks for the latest.'
         ),
     )
-    programs: bool = Field(
-        default=False,
+    programs: bool | None = Field(
+        default=None,
         description=(
             "Answer from the site's generated discovery program when it is healthy, and crawl otherwise; after "
-            'a crawl a program is written in the background for next time. Needs PROGRAMS_DIR, and a coding '
-            'model (CODEGEN_MODEL) to write programs.'
+            'a crawl a program is written in the background for next time. Default: on whenever PROGRAMS_DIR is '
+            'set (a coding model, CODEGEN_MODEL, writes the programs); false forces a plain crawl.'
         ),
     )
     include_rejected: bool = Field(
@@ -307,8 +307,9 @@ def _latest_judge(payload: DiscoverRequest) -> RelevanceJudge | None:
 
 
 def _discover(payload: DiscoverRequest, llm: LLMClient, on_event=None):
-    """A crawl, or with `programs` the hybrid: the site's program when it is healthy, the crawl otherwise."""
-    if not payload.programs:
+    """The hybrid - the site's program when it is healthy, the crawl otherwise - whenever programs are configured
+    (PROGRAMS_DIR) and the request does not say `programs: false`; a plain crawl otherwise."""
+    if not (bool(PROGRAMS_DIR) if payload.programs is None else payload.programs):
         return apply_latest(_run_crawl(payload, llm, on_event), payload.latest, payload.include_rejected,
                             judge=lambda: _latest_judge(payload))
     store = _require_programs_dir()

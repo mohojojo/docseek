@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from ..jev_crawl import year_of
 from ..judge import RelevanceJudge, verdict_for
@@ -125,11 +125,20 @@ def health(error: str | None, kept: int, last_kept: int | None) -> str:
     return 'healthy'
 
 
+_URL_SAFE = "!$&'()*+,/:;=?#@[]%-._~"    # what may stand raw in a URL; a space or an accent may not
+
+
+def as_url(url: str) -> str:
+    """A program's URL as the wire needs it: a space or a non-ASCII letter in a name read from a site's JSON is
+    percent-encoded; what is encoded already ("%2F" in a storage path) stays as it is."""
+    return quote(url.strip(), safe=_URL_SAFE)
+
+
 def as_candidates(documents: list[dict]) -> list[dict]:
     """A program's documents as the judge sees a crawl's links. A program's `context` is by definition where the
     document sits (its section, column or tab, its row, its date), so it goes where a crawl puts the section heading
     - shown with every link - not in the surrounding text, which a judge only sees for links with short names."""
-    return [{'url': d['url'], 'name': d['name'], 'context': d.get('context', ''), 'section': d.get('context', '')}
+    return [{'url': as_url(d['url']), 'name': d['name'], 'context': d.get('context', ''), 'section': d.get('context', '')}
             for d in documents]
 
 
@@ -138,7 +147,8 @@ def judge_documents(goal: str, start_url: str, documents: list[dict], judge: Rel
     candidates = as_candidates(documents)
     scores = judge.relevance(goal, f'documents found on {start_url}', candidates) if candidates else []
     return [AgenticDownload(
-        url=d['url'], name=d['name'] or d['url'].rsplit('/', 1)[-1], reason='generated program', source_page=start_url,
+        url=as_url(d['url']), name=d['name'] or d['url'].rsplit('/', 1)[-1], reason='generated program',
+        source_page=start_url,
         relevance=s, verdict=verdict_for(s), source='program', period=period_of(f"{d['name']} {d['url']}"),
         year=year_of(f"{d.get('context', '')} {d['name']} {d['url']}"), published=date_of(d.get('context', '')))
         for d, s in zip(documents, scores)]
