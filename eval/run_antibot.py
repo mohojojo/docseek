@@ -20,6 +20,8 @@ does not help the next:
     http+cookie   the browser way, then a plain httpx GET with the crawl's clearance hooks
                   (docseek.proxy.clearance_hooks): the browser's cf_clearance and user agent, when the crawl lends
                   them (BROWSER_STEALTH only), which is what the probes, API mining and codegen fetcher send
+    browser-fetch the browser way, then the same URL fetched again from inside the page (window.fetch): an HTTP
+                  fetch that leaves from the browser itself, same-origin only
 
 Outcomes: `pass` (no challenge), `solved` (a challenge that cleared within --wait), `challenge` (still on the
 challenge page), `blocked` (an error status without a challenge), `error`.
@@ -46,7 +48,7 @@ from docseek.reach import bare_host
 from docseek.scraper import _DEFAULT_USER_AGENT, _TRACKING_SCRIPT_HOSTS
 
 _REPORTS = Path(__file__).resolve().parent / 'reports'
-WAYS = ('http', 'browser', 'browser+jev', 'http+cookie')
+WAYS = ('http', 'browser', 'browser+jev', 'http+cookie', 'browser-fetch')
 DEFAULT_URLS = (
     'https://example.com/',                                        # control: not on Cloudflare
     'https://www.cloudflare.com/',                                 # control: on Cloudflare, no challenge
@@ -87,6 +89,14 @@ def check_http(url: str, user_agent: str, lend_clearance: bool = False) -> dict:
             'cloudflare': on_cloudflare(response.headers)}
 
 
+_IN_PAGE_FETCH_JS = """async url => {
+    const response = await fetch(url, {credentials: 'include', redirect: 'follow'});
+    const text = await response.text();
+    return {status: response.status,
+            challenged: response.headers.get('cf-mitigated') === 'challenge' || text.includes('_cf_chl_opt')};
+}"""
+
+
 def _challenged(page) -> bool:
     try:
         return page.evaluate("() => [...document.scripts].some(s => s.textContent.includes('_cf_chl_opt'))") \
@@ -113,7 +123,7 @@ def _jev_route(url: str):
 
 
 def check_browser(url: str, user_agent: str, *, jev_routes: bool, wait_s: float, headless: bool,
-                  cookie_handoff: bool = False) -> dict:
+                  cookie_handoff: bool = False, in_page_fetch: bool = False) -> dict:
     proxy._clearances.clear()              # only what this browser wins
     with sync_playwright() as p:
         browser = launch_browser(p, headless)
@@ -145,6 +155,10 @@ def check_browser(url: str, user_agent: str, *, jev_routes: bool, wait_s: float,
             if cookie_handoff:
                 result = {**check_http(url, user_agent, lend_clearance=True), 'browser_outcome': result['outcome'],
                           'lent': proxy.clearance_for(urlparse(url).netloc) is not None}
+            if in_page_fetch:
+                fetched = page.evaluate(_IN_PAGE_FETCH_JS, url)
+                result = {'outcome': outcome(fetched['challenged'], fetched['challenged'], fetched['status']),
+                          'status': fetched['status'], 'browser_outcome': result['outcome']}
             close_context(context)
             return result
         finally:
@@ -156,7 +170,8 @@ def check(url: str, way: str, args) -> dict:
         if way == 'http':
             return check_http(url, args.user_agent)
         return check_browser(url, args.user_agent, jev_routes=way == 'browser+jev', wait_s=args.wait,
-                             headless=not args.headed, cookie_handoff=way == 'http+cookie')
+                             headless=not args.headed, cookie_handoff=way == 'http+cookie',
+                             in_page_fetch=way == 'browser-fetch')
     except Exception as exc:  # noqa: BLE001 - one unreachable target is a row in the report, not the end of the run
         return {'outcome': 'error', 'error': f'{type(exc).__name__}: {exc}'[:200]}
 
