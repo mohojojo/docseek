@@ -138,6 +138,8 @@ class Frontier:
     def add(self, url: str, *, kind: str, probability: float, depth: int, other_language: bool = False,
             path_seen: bool = False, group: str = '', parent: str | None = None, goal_year: bool = False,
             revealed: bool = False, chrome: bool = False, planned: bool = False) -> None:
+        if self._group_of.get(url) == 'seed':
+            return        # a sitemap or a page linking the start URL must not re-rank it: it is read first
         group = group or url_template(url)
         key = frontier_key(kind, probability, depth, other_language, self._order + 1, path_seen, goal_year, revealed,
                            chrome and self.content_first, self.listing_first, planned)

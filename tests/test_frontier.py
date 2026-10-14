@@ -198,3 +198,14 @@ def test_a_planned_page_leads_its_tier_after_revealed_and_goal_year_pages():
     revealed = frontier_key('fund_or_product', 0.4, 0, False, 3, revealed=True)
     assert sorted([plain, planned, year, revealed]) == [revealed, year, planned, plain]
     assert planned[1] == plain[1]                      # an order within the tier, not a promotion
+
+
+def test_the_seed_stays_first_when_the_sitemap_lists_it_too():
+    """A sitemap that lists the start URL once re-ranked it as an ordinary page: classified as news, it
+    waited behind every fund page and a 50-page crawl never read the page it was pointed at."""
+    frontier = Frontier()
+    frontier.add_seed('https://site.example/reports')
+    frontier.add('https://site.example/reports', kind='news_or_article', probability=0.6, depth=0)
+    frontier.add('https://site.example/fund', kind='fund_or_product', probability=0.9, depth=0)
+
+    assert frontier.pop() == ('https://site.example/reports', 0, 'seed')
