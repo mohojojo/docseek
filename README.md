@@ -218,8 +218,10 @@ All are optional; without them a crawl runs from the host with a local Chromium.
   with the automation tells patched out, and the crawl clicks the challenge's checkbox when it shows one. Install
   it with `pip install "docseek[stealth]"` and `patchright install chrome` (Chrome itself: Patchright's bundled
   Chromium does not pass). The site sees the host's IP, or `PROXY_SERVER`'s; an IP that Cloudflare blocks
-  outright stays blocked. It works until Cloudflare's detection moves on, so measure before relying on it.
-  The Docker image ships Chromium only.
+  outright stays blocked. Once the browser clears a site's challenge, the plain HTTP fetches (document probes,
+  API mining, the codegen fetcher) send its `cf_clearance` cookie and user agent to that site, which lets them
+  through for as long as the cookie lasts. It works until Cloudflare's detection moves on, so measure before
+  relying on it. The Docker image ships Chromium only.
 
 `python -m eval.run_antibot` measures what a given setup gets past.
 

@@ -20,7 +20,7 @@ import httpx
 
 from ..jev_crawl import _HARVEST_JS, BLOCKED_RESOURCES
 from ..proxy import (
-    http_proxy, launch_browser, new_page, record_challenge, starting_browser, sync_playwright, use_browser,
+    clearance_hooks, http_proxy, launch_browser, new_page, record_challenge, starting_browser, sync_playwright, use_browser,
     wait_out_challenge,
 )
 from ..reach import bare_host, is_safe_url, robots_allows
@@ -70,7 +70,7 @@ class Fetcher:
         self.requests = self.renders = 0
         self.user_agent = user_agent
         self._client = httpx.Client(headers={'User-Agent': user_agent}, follow_redirects=True, timeout=30,
-                                    proxy=http_proxy())
+                                    proxy=http_proxy(), event_hooks=clearance_hooks())
         self._last = 0.0
         self._lock = threading.Lock()
         self._pw = self._browser = None

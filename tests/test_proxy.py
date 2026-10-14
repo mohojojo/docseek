@@ -1,4 +1,5 @@
 """Proxy (docseek.proxy): the crawl's traffic to the site goes through PROXY_SERVER, the model providers' does not."""
+import time
 import urllib.request
 
 import httpx
@@ -315,3 +316,63 @@ def test_with_only_a_local_browser_there_is_nothing_to_choose(monkeypatch, tmp_p
     monkeypatch.setenv('BROWSER_DEFAULT', 'local')
     assert proxy.starting_browser('site.example', str(tmp_path)) is None
     proxy.record_challenge('site.example', None)                              # no patterns dir: nothing kept
+
+
+# --- the browser's clearance, lent to the plain HTTP fetches ----------------------------------------------------
+
+@pytest.fixture
+def no_clearances(monkeypatch):
+    monkeypatch.setattr(proxy, '_clearances', {})
+
+
+class ClearedPage(CheckboxPage):
+    """A challenge that clears on its checkbox and leaves Cloudflare's cookies in the context."""
+    user_agent = 'Mozilla/5.0 (Macintosh) Chrome/155.0.0.0 Safari/537.36'
+
+    def __init__(self, cookies):
+        super().__init__()
+        self.context, self._cookies = self, cookies
+
+    def cookies(self, url):
+        return self._cookies
+
+    def evaluate(self, script):
+        return self.user_agent if 'userAgent' in script else super().evaluate(script)
+
+
+def _cookie(name, value, domain='.site.example', expires=-1):
+    return {'name': name, 'value': value, 'domain': domain, 'expires': expires}
+
+
+def test_a_cleared_challenge_lends_its_cookies_and_user_agent_to_httpx(monkeypatch, no_clearances):
+    monkeypatch.setenv('BROWSER_STEALTH', '1')
+    monkeypatch.setattr(proxy, 'CHECKBOX_AFTER_S', 0)
+    assert proxy.wait_out_challenge(ClearedPage([_cookie('cf_clearance', 'ok'), _cookie('__cf_bm', 'bm')]))
+
+    sent = []
+    transport = httpx.MockTransport(lambda request: sent.append(request) or httpx.Response(200))
+    with httpx.Client(transport=transport, headers={'User-Agent': 'docseek'}, cookies={'own': '1'},
+                      event_hooks=proxy.clearance_hooks()) as client:
+        client.get('https://docs.site.example/a.pdf')
+        client.get('https://other.example/')
+    cleared, other = sent
+    assert cleared.headers['cookie'] == 'own=1; cf_clearance=ok; __cf_bm=bm'
+    assert cleared.headers['user-agent'] == ClearedPage.user_agent
+    assert other.headers['user-agent'] == 'docseek' and 'cf_clearance' not in other.headers['cookie']
+
+
+def test_a_remote_browsers_clearance_is_not_lent(monkeypatch, no_clearances):
+    # it was won from the service's IP, which the HTTP fetches do not leave from
+    monkeypatch.setenv('BROWSER_CDP_URL', 'wss://remote.example')
+    page = ClearedPage([_cookie('cf_clearance', 'ok')])
+    page.challenged = 1
+    assert proxy.wait_out_challenge(page)
+    assert proxy.clearance_for('site.example') is None
+
+
+def test_an_expired_clearance_is_not_lent(no_clearances):
+    proxy._clearances['site.example'] = ([_cookie('cf_clearance', 'old', expires=1)], 'ua')
+    assert proxy.clearance_for('site.example') is None
+    proxy._clearances['site.example'] = ([_cookie('cf_clearance', 'new', expires=time.time() + 600)], 'ua')
+    assert proxy.clearance_for('www.site.example') == ({'cf_clearance': 'new'}, 'ua')
+    assert proxy.clearance_for('notsite.example') is None

@@ -16,7 +16,7 @@ from urllib.parse import quote, urljoin
 import httpx
 
 from .models import AgenticDownload, CrawlPlan
-from .proxy import http_proxy
+from .proxy import clearance_hooks, http_proxy
 from .reach import is_safe_url
 
 logger = logging.getLogger(__name__)
@@ -142,7 +142,8 @@ def mine_documents(
     Deterministic and browserless. Returns [] when no supported backend is found.
     """
     headers = {'User-Agent': user_agent}
-    with httpx.Client(headers=headers, follow_redirects=True, proxy=http_proxy()) as client:
+    with httpx.Client(headers=headers, follow_redirects=True, proxy=http_proxy(),
+                      event_hooks=clearance_hooks()) as client:
         bundles = _fetch_bundle_texts(client, page_url)
         cfg = None
         bundle_for_collections = ''

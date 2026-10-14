@@ -13,6 +13,7 @@ variables and not HTTPS_PROXY, which httpx, urllib and the provider SDKs would a
     BROWSER_STEALTH  1: the local browser is Google Chrome driven by Patchright (Playwright with the automation
                      tells patched out), which gets past Cloudflare's challenge page from the host's own IP or
                      the proxy's. Needs the `stealth` extra and an installed Chrome. BROWSER_CDP_URL wins.
+                     A challenge it clears lends its cf_clearance to the plain HTTP fetches (clearance_hooks).
 
 Read on every call, so a server picks up a change on its next crawl.
 """
@@ -22,6 +23,7 @@ import logging
 import contextvars
 import os
 import sys
+import threading
 import time
 import urllib.request
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -269,6 +271,59 @@ def wait_out_challenge(page, timeout_s: float = CHALLENGE_WAIT_S) -> bool:
                     page.wait_for_load_state('domcontentloaded', timeout=10_000)
                 except Exception:  # noqa: BLE001 - the page behind the challenge is there; let the caller read it
                     pass
+                if _stealth():
+                    _keep_clearance(page)
                 return True
     logger.warning("[challenge] not past Cloudflare's challenge: %s", page.url)
     return False
+
+
+# --- the browser's clearance, lent to the plain HTTP fetches ----------------------------------------------------
+# Cloudflare answers a cleared challenge with a cf_clearance cookie, bound to the browser's user agent and IP. A
+# plain httpx GET that carries the cookie and that user agent gets through where it got the challenge's 403
+# (eval/run_antibot.py, http+cookie). Kept only under BROWSER_STEALTH: a remote browser solves from its service's
+# IP, not the one the HTTP fetches leave from. Per process, in memory: a clearance lasts as long as the site says.
+
+_clearances: dict[str, tuple[list[dict], str]] = {}     # cookie domain -> (the browser's cookies there, user agent)
+_clearances_lock = threading.Lock()
+
+
+def _keep_clearance(page) -> None:
+    try:
+        cookies = page.context.cookies(page.url)
+        user_agent = page.evaluate('() => navigator.userAgent')
+    except Exception:  # noqa: BLE001 - the page is navigating on: the next cleared challenge will be kept
+        return
+    clearance = next((cookie for cookie in cookies if cookie['name'] == 'cf_clearance'), None)
+    if clearance:
+        with _clearances_lock:
+            _clearances[clearance['domain'].lstrip('.')] = (cookies, user_agent)
+        logger.info('[challenge] keeping the clearance for %s for the HTTP fetches', clearance['domain'])
+
+
+def clearance_for(host: str) -> tuple[dict[str, str], str] | None:
+    """The cookies and user agent the browser cleared `host`'s challenge with, while its cf_clearance lasts."""
+    host = host.lower()
+    with _clearances_lock:
+        for domain, (cookies, user_agent) in _clearances.items():
+            if host == domain or host.endswith('.' + domain):
+                now = time.time()
+                live = {cookie['name']: cookie['value'] for cookie in cookies
+                        if cookie.get('expires', -1) < 0 or cookie['expires'] > now}
+                return (live, user_agent) if 'cf_clearance' in live else None
+    return None
+
+
+def _lend_clearance(request) -> None:
+    clearance = clearance_for(request.url.host)
+    if not clearance:
+        return
+    cookies, user_agent = clearance
+    sent = request.headers.get('cookie')
+    request.headers['cookie'] = '; '.join(([sent] if sent else []) + [f'{k}={v}' for k, v in cookies.items()])
+    request.headers['user-agent'] = user_agent
+
+
+def clearance_hooks() -> dict:
+    """httpx `event_hooks=` that send the browser's clearance to a host it cleared."""
+    return {'request': [_lend_clearance]}

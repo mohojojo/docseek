@@ -17,6 +17,9 @@ does not help the next:
                   (docseek.proxy.wait_out_challenge): the agent's pages
     browser+jev   the same under the Jev crawl's request blocking (no images, media or fonts, no third-party
                   XHR), which is what a challenge has to solve itself under there
+    http+cookie   the browser way, then a plain httpx GET with the crawl's clearance hooks
+                  (docseek.proxy.clearance_hooks): the browser's cf_clearance and user agent, when the crawl lends
+                  them (BROWSER_STEALTH only), which is what the probes, API mining and codegen fetcher send
 
 Outcomes: `pass` (no challenge), `solved` (a challenge that cleared within --wait), `challenge` (still on the
 challenge page), `blocked` (an error status without a challenge), `error`.
@@ -34,6 +37,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+from docseek import proxy
 from docseek.jev_crawl import BLOCKED_RESOURCES
 from docseek.proxy import (
     CHALLENGE_HOSTS, browser_context, close_context, http_proxy, launch_browser, sync_playwright, wait_out_challenge,
@@ -42,15 +46,15 @@ from docseek.reach import bare_host
 from docseek.scraper import _DEFAULT_USER_AGENT, _TRACKING_SCRIPT_HOSTS
 
 _REPORTS = Path(__file__).resolve().parent / 'reports'
-WAYS = ('http', 'browser', 'browser+jev')
+WAYS = ('http', 'browser', 'browser+jev', 'http+cookie')
 DEFAULT_URLS = (
     'https://example.com/',                                        # control: not on Cloudflare
     'https://www.cloudflare.com/',                                 # control: on Cloudflare, no challenge
     'https://www.scrapingcourse.com/cloudflare-challenge',         # managed challenge, built to be scraped
     'https://www.scrapingcourse.com/antibot-challenge',
     'https://nopecha.com/demo/cloudflare',
-    'https://2captcha.com/demo/cloudflare-turnstile-challenge',
-)
+    'https://2captcha.com/demo/cloudflare-turnstile-challenge',     # control: a block page, the site's own rule
+)                                                                   # on this path: blocked in every mode
 CHALLENGE_TITLE = 'just a moment'           # 'Attention Required!' is a block page: nothing there to solve
 
 
@@ -74,9 +78,9 @@ def outcome(challenged_first: bool, challenged_last: bool, status: int) -> str:
     return 'solved' if challenged_first else 'pass'
 
 
-def check_http(url: str, user_agent: str) -> dict:
-    with httpx.Client(headers={'User-Agent': user_agent}, follow_redirects=True, timeout=30,
-                      proxy=http_proxy()) as client:
+def check_http(url: str, user_agent: str, lend_clearance: bool = False) -> dict:
+    with httpx.Client(headers={'User-Agent': user_agent}, follow_redirects=True, timeout=30, proxy=http_proxy(),
+                      event_hooks=proxy.clearance_hooks() if lend_clearance else None) as client:
         response = client.get(url)
     challenged = response.headers.get('cf-mitigated') == 'challenge' or '_cf_chl_opt' in response.text
     return {'outcome': outcome(challenged, challenged, response.status_code), 'status': response.status_code,
@@ -108,7 +112,9 @@ def _jev_route(url: str):
     return route
 
 
-def check_browser(url: str, user_agent: str, *, jev_routes: bool, wait_s: float, headless: bool) -> dict:
+def check_browser(url: str, user_agent: str, *, jev_routes: bool, wait_s: float, headless: bool,
+                  cookie_handoff: bool = False) -> dict:
+    proxy._clearances.clear()              # only what this browser wins
     with sync_playwright() as p:
         browser = launch_browser(p, headless)
         try:
@@ -136,6 +142,9 @@ def check_browser(url: str, user_agent: str, *, jev_routes: bool, wait_s: float,
                               user_agent=page.evaluate('() => navigator.userAgent'))
             except Exception:  # noqa: BLE001 - a challenge page that reloads itself mid-read still has an outcome
                 pass
+            if cookie_handoff:
+                result = {**check_http(url, user_agent, lend_clearance=True), 'browser_outcome': result['outcome'],
+                          'lent': proxy.clearance_for(urlparse(url).netloc) is not None}
             close_context(context)
             return result
         finally:
@@ -147,7 +156,7 @@ def check(url: str, way: str, args) -> dict:
         if way == 'http':
             return check_http(url, args.user_agent)
         return check_browser(url, args.user_agent, jev_routes=way == 'browser+jev', wait_s=args.wait,
-                             headless=not args.headed)
+                             headless=not args.headed, cookie_handoff=way == 'http+cookie')
     except Exception as exc:  # noqa: BLE001 - one unreachable target is a row in the report, not the end of the run
         return {'outcome': 'error', 'error': f'{type(exc).__name__}: {exc}'[:200]}
 
