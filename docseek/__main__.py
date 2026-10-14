@@ -75,6 +75,11 @@ def _discover(argv: list[str]) -> None:
             print(f'  -> {ev.get("url", "")}', file=sys.stderr)
         elif ev.get('type') == 'agent_download':
             print(f'     found: {ev.get("url", "")}', file=sys.stderr)
+        elif ev.get('type') == 'crawl_complete' and 'probes' in ev:
+            refused = ', the site refused the HTTP client' if ev.get('http_refused') else ''
+            answers = ', '.join(f'{n} {kind}' for kind, n in (ev.get('page_answers') or {}).items())
+            print(f'  probes: {ev["probes"]}, {ev.get("page_probes", 0)} from the page'
+                  f'{f" ({answers})" if answers else ""}{refused}', file=sys.stderr)
 
     payload = server.DiscoverRequest(
         url=args.url, goal=args.goal, profile=args.profile, judge=args.judge, decision_layer=args.decision_layer,

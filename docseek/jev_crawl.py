@@ -1199,7 +1199,7 @@ def jev_crawl(
                     docs, page_links = split_links(sess.page.evaluate(_HARVEST_JS), url)
                     record['waited_for_app'] = True
                 # links the URL did not give away: ask the server, one sibling group at a time
-                served, page_links = probe.sort(page_links)
+                served, page_links = probe.sort(page_links, sess.page)
                 docs += served
                 record['probed_documents'] = len(served)
                 if on_trace:
@@ -1221,7 +1221,7 @@ def jev_crawl(
                               if c['url'] not in known and may_return(c['url']) and not known.add(c['url'])]
                 if mined:
                     by_url = [c for c in mined if looks_like_document(c['url'])]
-                    by_probe, _ = probe.sort_all([c for c in mined if not looks_like_document(c['url'])])
+                    by_probe, _ = probe.sort_all([c for c in mined if not looks_like_document(c['url'])], sess.page)
                     docs += by_url + by_probe
                 record['json'] = {'responses': len(sess.json_bodies), 'named': len(mined),
                                   'documents': len(mined) and len(by_url) + len(by_probe)}
@@ -1429,7 +1429,9 @@ def jev_crawl(
     # Rejected Candidates are a count, not rows - unless the caller asks to see them, which is
     # how you check what the relevance model threw away.
     returned = found if include_rejected else [c for c in found if c.verdict != 'rejected']
-    emit({'type': 'crawl_complete', 'pages_crawled': len(pages)})
+    emit({'type': 'crawl_complete', 'pages_crawled': len(pages), 'probes': probe.probes,
+          'page_probes': probe.page_probes, 'page_answers': dict(probe.page_answers),
+          'http_refused': probe.http_refused})
     return AgenticCrawlResult(
         start_url=start_url, goal=goal, downloads=returned, pages_visited=len(pages),
         total_tokens=tokens['prompt'] + tokens['completion'],
