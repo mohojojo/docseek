@@ -74,8 +74,11 @@ class ProgramStore:
         return Program(key, code.read_text(), json.loads(meta.read_text()))
 
     def save(self, program: Program) -> None:
+        """Store new code. Its snapshot recorded what the old code returned, so it goes: the next drift check takes a
+        fresh one instead of comparing the new code with the old."""
         self.root.mkdir(parents=True, exist_ok=True)
         self._path(program.key, '.py').write_text(program.code.rstrip('\n') + '\n')
+        self._path(program.key, '.snapshot.json').unlink(missing_ok=True)
         self.save_meta(program)
 
     def save_meta(self, program: Program) -> None:

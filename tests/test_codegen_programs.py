@@ -155,6 +155,16 @@ class TestStore:
         store.save_snapshot(KEY, {'date': 'd', 'urls': []})
         assert store.delete(KEY) and store.keys() == [] and not list(tmp_path.iterdir())
 
+    def test_new_code_drops_the_snapshot_and_a_metadata_update_keeps_it(self, tmp_path):
+        store = store_with_program(tmp_path)
+        store.save_snapshot(KEY, {'date': 'd', 'urls': []})
+        program = store.load(KEY)
+        program.meta['stale'] = True
+        store.save_meta(program)
+        assert store.load_snapshot(KEY) is not None
+        store.save(Program(KEY, 'documents = []', program.meta))
+        assert store.load_snapshot(KEY) is None
+
 
 class TestVerifiedAndLog:
     def test_an_unverified_program_never_answers(self, tmp_path):
