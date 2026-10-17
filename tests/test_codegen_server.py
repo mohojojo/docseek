@@ -112,6 +112,15 @@ def test_list_get_and_delete(client, tmp_path):
     assert client.get('/v1/programs/not..a..key').status_code == 404
 
 
+def test_a_programs_last_results(client, tmp_path):
+    save_program(tmp_path)
+    assert client.get(f'/v1/programs/{KEY}/results').json() == {'key': KEY, 'run': None, 'documents': []}
+    ProgramStore(tmp_path).save_results(KEY, {'run': '2026-10-17T12:05:32', 'documents': [{'url': 'u'}]})
+    got = client.get(f'/v1/programs/{KEY}/results').json()
+    assert got == {'key': KEY, 'run': '2026-10-17T12:05:32', 'documents': [{'url': 'u'}]}
+    assert client.get('/v1/programs/nobody__00000000/results').status_code == 404
+
+
 def test_generating_needs_a_coding_model(client, monkeypatch):
     monkeypatch.setattr(server, 'codegen_llm', lambda: None)
     response = client.post('/v1/programs', json={'url': URL, 'goal': GOAL})

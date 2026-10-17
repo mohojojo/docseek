@@ -4,6 +4,7 @@ A ProgramStore keeps one program per (start host, goal) in a directory (PROGRAMS
   <key>.py             the program
   <key>.json           its metadata: goal, start_url, notes, data_hosts, post_endpoints, model, usage, health
   <key>.snapshot.json  what it returned when snapshotted, for the drift check
+  <key>.results.json   the documents of its last answer, judged, rejected ones included
   <key>.log.json       the last generation's log (written even when it produced no program)
 
 Hybrid discovery - the program first, the crawl as the safety net:
@@ -74,11 +75,12 @@ class ProgramStore:
         return Program(key, code.read_text(), json.loads(meta.read_text()))
 
     def save(self, program: Program) -> None:
-        """Store new code. Its snapshot recorded what the old code returned, so it goes: the next drift check takes a
-        fresh one instead of comparing the new code with the old."""
+        """Store new code. Its snapshot and last results came from the old code, so they go: the next drift check
+        takes a fresh snapshot instead of comparing the new code with the old."""
         self.root.mkdir(parents=True, exist_ok=True)
         self._path(program.key, '.py').write_text(program.code.rstrip('\n') + '\n')
         self._path(program.key, '.snapshot.json').unlink(missing_ok=True)
+        self._path(program.key, '.results.json').unlink(missing_ok=True)
         self.save_meta(program)
 
     def save_meta(self, program: Program) -> None:
@@ -103,7 +105,7 @@ class ProgramStore:
         return path.stat().st_mtime if path.exists() else None
 
     def delete(self, key: str) -> bool:
-        paths = [self._path(key, s) for s in ('.py', '.json', '.snapshot.json', '.log.json')]
+        paths = [self._path(key, s) for s in ('.py', '.json', '.snapshot.json', '.log.json', '.results.json')]
         found = any(p.exists() for p in paths)
         for p in paths:
             p.unlink(missing_ok=True)
@@ -115,6 +117,13 @@ class ProgramStore:
 
     def save_snapshot(self, key: str, snapshot: dict) -> None:
         self._path(key, '.snapshot.json').write_text(json.dumps(snapshot, indent=1))
+
+    def load_results(self, key: str) -> dict | None:
+        path = self._path(key, '.results.json')
+        return json.loads(path.read_text()) if path.exists() else None
+
+    def save_results(self, key: str, results: dict) -> None:
+        self._path(key, '.results.json').write_text(json.dumps(results, indent=1, ensure_ascii=False, default=str))
 
 
 def health(error: str | None, kept: int, last_kept: int | None) -> str:
@@ -187,6 +196,9 @@ def hybrid_discover(start_url: str, goal: str, *, store: ProgramStore, judge: Re
         if reason == 'healthy':
             program.meta['last_kept'] = kept
             store.save_meta(program)
+            # kept so a caller can show the answer again without running the program
+            store.save_results(key, {'run': program.meta['last_run'],
+                                     'documents': [d.model_dump(mode='json') for d in downloads]})
             rejected = [d for d in downloads if d.verdict == 'rejected']
             return AgenticCrawlResult(
                 start_url=start_url, goal=goal,

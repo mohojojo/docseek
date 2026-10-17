@@ -500,6 +500,21 @@ def get_program(key: str, x_api_key: str | None = Header(default=None)) -> dict:
     return {'key': key, 'code': program.code, 'meta': program.meta, 'log': store.load_log(key)}
 
 
+@app.get('/v1/programs/{key}/results')
+def get_program_results(key: str, x_api_key: str | None = Header(default=None)) -> dict:
+    """The documents of a program's last answer, judged, rejected ones included: {key, run, documents}."""
+    _require_api_key(x_api_key)
+    store = _require_programs_dir()
+    try:
+        program = store.load(key)
+    except KeyError:
+        program = None
+    if program is None:
+        raise HTTPException(status_code=404, detail=f'No program: {key}')
+    results = store.load_results(key) or {}
+    return {'key': key, 'run': results.get('run'), 'documents': results.get('documents', [])}
+
+
 @app.delete('/v1/programs/{key}')
 def delete_program(key: str, x_api_key: str | None = Header(default=None)) -> dict:
     _require_api_key(x_api_key)

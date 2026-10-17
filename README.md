@@ -239,6 +239,7 @@ All are optional; without them a crawl runs from the host with a local Chromium.
 | `GET/DELETE /v1/patterns[/{domain}]` | Learned site knowledge. |
 | `POST /v1/programs` | Write (or rewrite) a site's discovery program in the background. |
 | `GET/DELETE /v1/programs[/{key}]` | Generated programs: code, notes, health. |
+| `GET /v1/programs/{key}/results` | The documents of a program's last answer, judged, rejected ones included. |
 | `POST /v1/programs/check` | Replay programs against their snapshots (drift check). |
 | `GET /health` | Liveness. |
 

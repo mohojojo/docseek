@@ -70,6 +70,22 @@ class TestHybrid:
         assert {d.source for d in result.downloads} == {'program'} and result.decision_model == 'program'
         assert store.load(KEY).meta['last_kept'] == 3
 
+    def test_a_programs_answer_is_saved_with_its_rejected_documents(self, tmp_path):
+        store = store_with_program(tmp_path, last_kept=3)
+        crawl, _ = crawled()
+        result = hybrid_discover(START, GOAL, store=store, judge=FakeJudge({DOCS[3]: 0.1}), crawl=crawl,
+                                 runner=runner_returning(DOCS))
+        saved = store.load_results(KEY)
+        assert saved['run'] == store.load(KEY).meta['last_run']
+        assert [d['url'] for d in saved['documents']] == DOCS and saved['documents'][3]['verdict'] == 'rejected'
+        assert len(result.downloads) == 3                  # the answer itself still leaves the rejected one out
+
+    def test_a_crawls_answer_is_not_saved_as_the_programs(self, tmp_path):
+        store = store_with_program(tmp_path, stale=True)
+        crawl, _ = crawled()
+        hybrid_discover(START, GOAL, store=store, judge=FakeJudge(), crawl=crawl, runner=runner_returning(DOCS))
+        assert store.load_results(KEY) is None
+
     def test_no_program_means_a_crawl(self, tmp_path):
         crawl, calls = crawled()
         result = hybrid_discover(START, GOAL, store=ProgramStore(tmp_path), judge=FakeJudge(), crawl=crawl)
@@ -162,6 +178,7 @@ class TestStore:
     def test_delete_removes_the_program_and_its_snapshot(self, tmp_path):
         store = store_with_program(tmp_path)
         store.save_snapshot(KEY, {'date': 'd', 'urls': []})
+        store.save_results(KEY, {'run': 'r', 'documents': []})
         assert store.delete(KEY) and store.keys() == [] and not list(tmp_path.iterdir())
 
     def test_new_code_drops_the_snapshot_and_a_metadata_update_keeps_it(self, tmp_path):
@@ -171,8 +188,9 @@ class TestStore:
         program.meta['stale'] = True
         store.save_meta(program)
         assert store.load_snapshot(KEY) is not None
+        store.save_results(KEY, {'run': 'r', 'documents': []})
         store.save(Program(KEY, 'documents = []', program.meta))
-        assert store.load_snapshot(KEY) is None
+        assert store.load_snapshot(KEY) is None and store.load_results(KEY) is None
 
 
 class TestVerifiedAndLog:
