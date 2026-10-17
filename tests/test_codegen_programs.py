@@ -142,6 +142,15 @@ class TestDrift:
         row = check_drift(store, runner=runner_returning(DOCS[:1]))[0]
         assert (row['status'], row['then'], row['now']) == ('shrank', 4, 1)
 
+    def test_each_check_is_saved_with_the_program(self, tmp_path):
+        store = store_with_program(tmp_path)
+        check_drift(store, runner=runner_returning(DOCS))
+        assert store.load(KEY).meta['last_check']['status'] == 'snapshot'
+        check_drift(store, runner=runner_returning(DOCS[:1]))
+        saved = store.load(KEY).meta['last_check']
+        assert (saved['status'], saved['then'], saved['now']) == ('shrank', 4, 1)
+        assert 'key' not in saved and saved['checked']
+
 
 class TestStore:
     def test_keys_are_validated_so_a_request_cannot_reach_other_files(self, tmp_path):

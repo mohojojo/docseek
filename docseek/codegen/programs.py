@@ -254,20 +254,27 @@ def snapshot(store: ProgramStore, key: str, runner=run_program) -> dict:
 
 def check_drift(store: ProgramStore, keys: list[str] | None = None, runner=run_program) -> list[dict]:
     """Replay each program and compare it with its snapshot. No model and no judge: it measures the programs, not
-    relevance. A program without a snapshot gets one and is reported as 'snapshot'."""
+    relevance. A program without a snapshot gets one and is reported as 'snapshot'. Each row is also saved in the
+    program's metadata as `last_check`, so a caller can show it without checking again; new code (a regeneration)
+    starts without one."""
     rows = []
     for key in keys or store.keys():
         program = store.load(key)
         if program is None:
             continue
+        checked = time.strftime('%Y-%m-%dT%H:%M:%S')
         then = store.load_snapshot(key)
         if then is None:
             now = snapshot(store, key, runner)
-            rows.append({'key': key, 'status': 'snapshot', 'now': len(now['urls']), 'error': now['error']})
-            continue
-        now = replay(program, runner)
-        state, kept = drift_status(now, then)
-        rows.append({'key': key, 'status': state, 'kept': round(kept, 2), 'then': len(then['urls']),
-                     'now': len(now['urls']), 'snapshot': then['date'], 'fetch_failures': now['fetch_failures'],
-                     'error': (now['error'] or '')[-300:] or None})
+            row = {'key': key, 'status': 'snapshot', 'now': len(now['urls']), 'error': now['error']}
+        else:
+            now = replay(program, runner)
+            state, kept = drift_status(now, then)
+            row = {'key': key, 'status': state, 'kept': round(kept, 2), 'then': len(then['urls']),
+                   'now': len(now['urls']), 'snapshot': then['date'], 'fetch_failures': now['fetch_failures'],
+                   'error': (now['error'] or '')[-300:] or None}
+        row['checked'] = checked
+        program.meta['last_check'] = {k: v for k, v in row.items() if k != 'key'}
+        store.save_meta(program)
+        rows.append(row)
     return rows

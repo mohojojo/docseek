@@ -476,7 +476,7 @@ class DriftRequest(BaseModel):
 
 def _program_summary(key: str, meta: dict) -> dict:
     fields = ('goal', 'start_url', 'generated', 'model', 'submitted', 'verified', 'stale', 'last_run', 'last_reason',
-              'last_kept', 'failures')
+              'last_kept', 'failures', 'last_check')
     return {'key': key, **{f: meta.get(f) for f in fields}}
 
 

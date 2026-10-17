@@ -101,9 +101,10 @@ def test_programs_false_is_a_plain_crawl(client, monkeypatch):
 
 
 def test_list_get_and_delete(client, tmp_path):
-    save_program(tmp_path, last_kept=3)
+    save_program(tmp_path, last_kept=3, last_check={'status': 'ok', 'checked': '2026-10-17T10:00:00'})
     listed = client.get('/v1/programs').json()
     assert listed[0]['key'] == KEY and listed[0]['last_kept'] == 3
+    assert listed[0]['last_check']['status'] == 'ok'
     got = client.get(f'/v1/programs/{KEY}').json()
     assert got['code'].startswith('def discover') and got['meta']['goal'] == GOAL
     assert client.delete(f'/v1/programs/{KEY}').json() == {'deleted': True, 'key': KEY}

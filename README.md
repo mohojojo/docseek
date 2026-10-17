@@ -151,7 +151,9 @@ Once `PROGRAMS_DIR` is set, `/v1/discover` answers from the site's program when 
 otherwise (`"programs": false` forces a crawl): when the program errors, returns nothing where it used to find documents, or keeps fewer than half of
 what it kept last time, it is marked stale, the crawl answers, and a new program is written in the background.
 `docseek check` (or `POST /v1/programs/check`) replays every program against a snapshot of what it returned
-before - no model, no judge - and reports `ok`, `grew`, `shrank` or `broken`.
+before - no model, no judge - and reports `ok`, `grew`, `shrank` or `broken`. The first check of a program records
+that snapshot instead (`snapshot`), and a regenerated program starts a new one. Each result is saved with the
+program as `last_check`, which `GET /v1/programs` returns, so it can be shown without checking again.
 
 What a program can do is fenced in: it runs in a separate process with an empty environment, CPU and memory
 limits, an allowlist of standard-library modules, and no network except the parent's fetcher - the site and its
